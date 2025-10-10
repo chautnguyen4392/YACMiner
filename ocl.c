@@ -530,15 +530,21 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		} else
 			cgpu->lookup_gap = cgpu->opt_lg;
 
-		unsigned int bsize = opt_n_scrypt ? 2048 : 1024;
+		unsigned long bsize;
+		if (opt_scrypt_chacha && opt_fixed_nfactor > 0)
+			bsize = 1 << (opt_fixed_nfactor + 1);
+		else if (opt_n_scrypt)
+			bsize = 2048;
+		else
+			bsize = 1024;
 		size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
 
 		// if we do not have TC and we do not have BS, then calculate some conservative numbers
 		if ((!cgpu->opt_tc) && (!cgpu->buffer_size)) {
-			unsigned int base_alloc;
+			unsigned long base_alloc;
 
 			// default to 88% of the available memory and find the closest MB value divisible by 8
-			base_alloc = (int)(cgpu->max_alloc * 88 / 100 / 1024 / 1024 / 8) * 8 * 1024 * 1024 / cgpu->threads;
+			base_alloc = (unsigned long)(cgpu->max_alloc * 88 / 100 / 1024 / 1024 / 8) * 8 * 1024 * 1024 / cgpu->threads;
 			// base_alloc is now the number of bytes to allocate.  
 			// 2 threads of 336 MB did not fit into dedicated VRAM while 1 thread of 772MB did.  334 MB each did
 			// to be safe, reduce by 2MB per thread beyond the first
@@ -547,7 +553,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 
 			cgpu->thread_concurrency = base_alloc / 128 / ipt;
 			cgpu->buffer_size = base_alloc / 1024 / 1024;
-			applog(LOG_DEBUG,"88%% Max Allocation: %u",base_alloc);
+			applog(LOG_DEBUG,"88%% Max Allocation: %lu",base_alloc);
 			applog(LOG_NOTICE, "GPU %d: selecting buffer_size of %zu", gpu, cgpu->buffer_size);
 		} else
 			cgpu->thread_concurrency = cgpu->opt_tc;
@@ -555,7 +561,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		if (cgpu->buffer_size) {
 			// use the buffer-size to overwrite the thread-concurrency
 			cgpu->thread_concurrency = (int)((cgpu->buffer_size * 1024 * 1024) / ipt / 128);
-			applog(LOG_DEBUG, "GPU %d: setting thread_concurrency to %d based on buffer size %d and lookup gap %d", gpu, (int)(cgpu->thread_concurrency),(int)(cgpu->buffer_size),(int)(cgpu->lookup_gap));
+			applog(LOG_DEBUG, "GPU %d: setting thread_concurrency to %lu based on buffer size %lu and lookup gap %d", gpu, (unsigned long)(cgpu->thread_concurrency),(unsigned long)(cgpu->buffer_size),(int)(cgpu->lookup_gap));
 		}
 	}
 #endif
@@ -864,9 +870,22 @@ built:
 #ifdef USE_SCRYPT
 	if (opt_scrypt) {
 
-		unsigned int bsize = opt_n_scrypt ? 2048 : 1024;
+		unsigned long bsize;
+		if (opt_scrypt_chacha && opt_fixed_nfactor > 0)
+			bsize = 1 << (opt_fixed_nfactor + 1);
+		else if (opt_n_scrypt)
+			bsize = 2048;
+		else
+			bsize = 1024;
+
 		size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
 		size_t bufsize = 128 * ipt * cgpu->thread_concurrency;
+
+		if (bufsize < cgpu->max_alloc) {
+			applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu", gpu, (unsigned long)cgpu->max_alloc);
+			applog(LOG_WARNING, "Your scrypt settings come to %lu, setting to %lu", (unsigned long)bufsize, (unsigned long)cgpu->max_alloc);
+			bufsize = cgpu->max_alloc;
+		}
 
 		if (!cgpu->buffer_size) {
 			applog(LOG_NOTICE, "GPU %d: bufsize for thread @ %dMB based on TC of %zu", gpu, (int)(bufsize/1048576),cgpu->thread_concurrency);
