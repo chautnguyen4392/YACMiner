@@ -64,37 +64,43 @@ void sc_scrypt_regenhash(struct work *work)
 	int maxn = sc_maxn;
 	long starttime = sc_starttime;
 		
-	applog(LOG_DEBUG, "timestamp %d", data[17]);
-        
 //        int nfactor = sj_GetNfactor(data[17]);
 
-		if (work->pool->sc_minn)
-			{
-			minn = *work->pool->sc_minn;
-			//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_minn: %d",*work->pool->sc_minn);
-			}
-		if (work->pool->sc_maxn)
-			{
-			maxn = *work->pool->sc_maxn;
-			//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_maxn);
-			}
-		if (work->pool->sc_starttime)
-			{
-			starttime = *work->pool->sc_starttime;
-			//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_starttime);
-			}
-		int nfactor = GetNfactor(data[17], minn, maxn, starttime);
-	
-        applog(LOG_DEBUG, "Dat0: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9],
-            data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17], data[18], data[19]);
-    
-        sj_scrypt((unsigned char *)data, 80, 
-                       (unsigned char *)data, 80, 
-                       nfactor, 0, 0, (unsigned char *)ohash, 32);
+	if (work->pool->sc_minn)
+	{
+		minn = *work->pool->sc_minn;
+		//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_minn: %d",*work->pool->sc_minn);
+	}
+	if (work->pool->sc_maxn)
+	{
+		maxn = *work->pool->sc_maxn;
+		//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_maxn);
+	}
+	if (work->pool->sc_starttime)
+	{
+		starttime = *work->pool->sc_starttime;
+		//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_starttime);
+	}
+	int nfactor = GetNfactor(data[17], minn, maxn, starttime);
+
+	/* Print data array as hex string */
+	char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
+
+	// The ohash is in little endian format
+	sj_scrypt((unsigned char *)data, 80,
+			(unsigned char *)data, 80,
+			nfactor, 0, 0, (unsigned char *)ohash, 32);
     
 //	flip32(ohash, ohash); // Not needed for scrypt-chacha - mikaelh
-        uint32_t *o = ohash;
-	applog(LOG_DEBUG, "Nonce: %x, Output buffe0: %x %x %x %x %x %x %x %x", *nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
+	uint32_t *o = ohash;
+	/* Print ohash as hex string in big endian */
+	uint32_t ohash_be[8];
+	swab256(ohash_be, ohash);
+	char *ohash_hex = bin2hex((unsigned char *)ohash_be, 32);
+	applog(LOG_DEBUG, "Data array: %s, timestamp %d, Nfactor: %d, Nonce: %u, Output hash (BE): %s",
+		data_hex, data[17], nfactor, data[19], ohash_hex);
+	free(data_hex);
+	free(ohash_hex);
 }
 
 static const uint32_t sj_diff1targ = 0x0000ffff;

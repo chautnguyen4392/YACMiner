@@ -91,8 +91,8 @@ bool opt_compact;
 const int opt_cutofftemp = 95;
 int opt_log_interval = 5;
 int opt_queue = 1;
-int opt_scantime = 60;
-int opt_expiry = 60;
+int opt_scantime = 120;
+int opt_expiry = 120;
 static const bool opt_time = true;
 unsigned long long global_hashrate;
 
@@ -2804,7 +2804,7 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 
 		swab256(rhash, work->hash);
 		if (opt_scrypt)
-			outhash = bin2hex(rhash + 2, 4);
+			outhash = bin2hex(rhash, 4);
 		else
 			outhash = bin2hex(rhash + 4, 4);
 		suffix_string((double)work->share_diff, diffdisp, 0);
