@@ -2173,43 +2173,43 @@ void tailsprintf(char *f, const char *fmt, ...)
 	va_end(ap);
 }
 
-/* Convert a uint64_t value into a truncated string for displaying with its
+/* Convert a double value into a truncated string for displaying with its
  * associated suitable for Mega, Giga etc. Buf array needs to be long enough */
-static void suffix_string(uint64_t val, char *buf, int sigdigits)
+static void suffix_string(double val, char *buf, int sigdigits)
 {
-	const double  dkilo = 1000.0;
-	const uint64_t kilo = 1000ull;
-	const uint64_t mega = 1000000ull;
-	const uint64_t giga = 1000000000ull;
-	const uint64_t tera = 1000000000000ull;
-	const uint64_t peta = 1000000000000000ull;
-	const uint64_t exa  = 1000000000000000000ull;
+	const double dkilo = 1000.0;
+	const double kilo = 1000.0;
+	const double mega = 1000000.0;
+	const double giga = 1000000000.0;
+	const double tera = 1000000000000.0;
+	const double peta = 1000000000000000.0;
+	const double exa  = 1000000000000000000.0;
 	char suffix[2] = "";
 	bool decimal = true;
 	double dval;
 
 	if (val >= exa) {
 		val /= peta;
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "E");
 	} else if (val >= peta) {
 		val /= tera;
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "P");
 	} else if (val >= tera) {
 		val /= giga;
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "T");
 	} else if (val >= giga) {
 		val /= mega;
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "G");
 	} else if (val >= mega) {
 		val /= kilo;
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "M");
 	} else if (val >= kilo) {
-		dval = (double)val / dkilo;
+		dval = val / dkilo;
 		sprintf(suffix, "K");
 	} else {
 		dval = val;
@@ -2225,6 +2225,10 @@ static void suffix_string(uint64_t val, char *buf, int sigdigits)
 		/* Always show sigdigits + 1, padded on right with zeroes
 		 * followed by suffix */
 		int ndigits = sigdigits - 1 - (dval > 0.0 ? floor(log10(dval)) : 0);
+		
+		/* Ensure we show at least 2 decimal places for better precision */
+		if (ndigits < 2)
+			ndigits = 2;
 
 		sprintf(buf, "%*.*f%s", sigdigits + 1, ndigits, dval, suffix);
 	}
@@ -2233,7 +2237,6 @@ static void suffix_string(uint64_t val, char *buf, int sigdigits)
 static void get_statline(char *buf, struct cgpu_info *cgpu)
 {
 	char displayed_hashes[16], displayed_rolling[16];
-	uint64_t dh64, dr64;
 	struct timeval now;
 	double dev_runtime;
 
@@ -2247,10 +2250,8 @@ static void get_statline(char *buf, struct cgpu_info *cgpu)
 	if (dev_runtime < 1.0)
 		dev_runtime = 1.0;
 
-	dh64 = (double)cgpu->total_mhashes / dev_runtime * 1000000ull;
-	dr64 = (double)cgpu->rolling * 1000000ull;
-	suffix_string(dh64, displayed_hashes, 4);
-	suffix_string(dr64, displayed_rolling, 4);
+	suffix_string((double)cgpu->total_mhashes / dev_runtime * 1000000.0, displayed_hashes, 4);
+	suffix_string((double)cgpu->rolling * 1000000.0, displayed_rolling, 4);
 
 	sprintf(buf, "%s%d ", cgpu->drv->name, cgpu->device_id);
 	cgpu->drv->get_statline_before(buf, cgpu);
@@ -2335,7 +2336,6 @@ static void curses_print_devstatus(struct cgpu_info *cgpu, int count)
 	static int dawidth = 1, drwidth = 1, hwwidth = 1, uwidth = 1;
 	char logline[256];
 	char displayed_hashes[16], displayed_rolling[16];
-	uint64_t dh64, dr64;
 	struct timeval now;
 	double dev_runtime;
 
@@ -2366,10 +2366,8 @@ static void curses_print_devstatus(struct cgpu_info *cgpu, int count)
 	cgpu->drv->get_statline_before(logline, cgpu);
 	wprintw(statuswin, "%s", logline);
 
-	dh64 = (double)cgpu->total_mhashes / dev_runtime * 1000000ull;
-	dr64 = (double)cgpu->rolling * 1000000ull;
-	suffix_string(dh64, displayed_hashes, 4);
-	suffix_string(dr64, displayed_rolling, 4);
+	suffix_string((double)cgpu->total_mhashes / dev_runtime * 1000000.0, displayed_hashes, 4);
+	suffix_string((double)cgpu->rolling * 1000000.0, displayed_rolling, 4);
 
 #ifdef USE_USBUTILS
 	if (cgpu->usbinfo.nodev)
@@ -2803,7 +2801,7 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 			outhash = bin2hex(rhash + 2, 4);
 		else
 			outhash = bin2hex(rhash + 4, 4);
-		suffix_string(work->share_diff, diffdisp, 0);
+		suffix_string((double)work->share_diff, diffdisp, 0);
 		sprintf(hashshow, "%s Diff %s/%d%s", outhash, diffdisp, intdiff,
 			work->block? " BLOCK!" : "");
 		free(outhash);
@@ -2990,7 +2988,7 @@ static void calc_diff(struct work *work, int known)
 	difficulty = work->work_difficulty;
 
 	pool_stats->last_diff = difficulty;
-	suffix_string((uint64_t)difficulty, work->pool->diff, 0);
+	suffix_string((double)difficulty, work->pool->diff, 0);
 
 	if (difficulty == pool_stats->min_diff)
 		pool_stats->min_diff_count++;
@@ -3539,7 +3537,7 @@ static uint64_t share_diff(const struct work *work)
 	if (unlikely(ret > best_diff)) {
 		new_best = true;
 		best_diff = ret;
-		suffix_string(best_diff, best_share, 0);
+		suffix_string((double)best_diff, best_share, 0);
 	}
 	if (unlikely(ret > work->pool->best_diff))
 		work->pool->best_diff = ret;
@@ -3923,9 +3921,9 @@ static void set_blockdiff(const struct work *work)
 
 	previous_diff = current_diff;
 	diff64 = diffone / d64;
-	suffix_string(diff64, block_diff, 0);
+	suffix_string((double)diff64, block_diff, 0);
 	current_diff = (double)diffone / (double)d64;
-	suffix_string (previous_diff, cprev_diff, 0);
+	suffix_string(previous_diff, cprev_diff, 0);
 	if (unlikely(strcmp(block_diff,cprev_diff) != 0))
 		applog(LOG_NOTICE, "Network diff set to %s", block_diff);
 }
@@ -4427,7 +4425,7 @@ void zero_bestshare(void)
 
 	best_diff = 0;
 	memset(best_share, 0, 8);
-	suffix_string(best_diff, best_share, 0);
+	suffix_string((double)best_diff, best_share, 0);
 
 	for (i = 0; i < total_pools; i++) {
 		struct pool *pool = pools[i];
@@ -4923,7 +4921,6 @@ static void hashmeter(int thr_id, struct timeval *diff,
 	double local_mhashes;
 	bool showlog = false;
 	char displayed_hashes[16], displayed_rolling[16];
-	uint64_t dh64, dr64;
 	struct thr_info *thr;
 
 	local_mhashes = (double)hashes_done / 1000000.0;
@@ -5001,10 +4998,8 @@ static void hashmeter(int thr_id, struct timeval *diff,
 
 	utility = total_diff_accepted / total_secs * 60;
 
-	dh64 = (double)total_mhashes_done / total_secs * 1000000ull;
-	dr64 = (double)rolling * 1000000ull;
-	suffix_string(dh64, displayed_hashes, 4);
-	suffix_string(dr64, displayed_rolling, 4);
+	suffix_string((double)total_mhashes_done / total_secs * 1000000.0, displayed_hashes, 4);
+	suffix_string((double)rolling * 1000000.0, displayed_rolling, 4);
 
 //	sprintf(statusline, "%s(%ds):%s (avg):%sh/s | A:%.0f  R:%.0f  HW:%d  U:%.2f/m  WU:%.1f/m  FB:%d",
 	sprintf(statusline, "%s(%ds):%s (avg):%sh/s | A:%.0f  R:%d  HW:%d  U:%.2f/m  WU:%.2f/m  FB:%d",
@@ -5037,7 +5032,7 @@ static void stratum_share_result(json_t *val, json_t *res_val, json_t *err_val,
 
 	hash32 = (uint32_t *)(work->hash);
 	intdiff = floor(work->work_difficulty);
-	suffix_string(work->share_diff, diffdisp, 0);
+	suffix_string((double)work->share_diff, diffdisp, 0);
 	sprintf(hashshow, "%08lx Diff %s/%d%s", (unsigned long)htole32(hash32[6]), diffdisp, intdiff,
 		work->block? " BLOCK!" : "");
 	share_result(val, res_val, err_val, work, hashshow, false, "");
