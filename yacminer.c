@@ -112,6 +112,7 @@ int gpu_threads;
 #ifdef USE_SCRYPT
 bool opt_scrypt=1;
 bool opt_scrypt_chacha=0;
+int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
 #endif
@@ -1085,7 +1086,9 @@ unsigned char Get_SN_Nfactor(unsigned int nTimestamp, int minn, int maxn, long s
 }
 
 unsigned char GetNfactor(unsigned int nTimestamp, int minn, int maxn, long starttime) {
-	if (opt_scrypt_chacha)
+	if (opt_fixed_nfactor > 0)
+		return opt_fixed_nfactor;
+	else if (opt_scrypt_chacha)
 		return Get_SC_Nfactor (nTimestamp, minn, maxn, starttime);
 	else if (opt_n_scrypt)
 		return Get_SN_Nfactor (nTimestamp, minn, maxn, starttime);
@@ -1290,6 +1293,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--nfmax",
 			set_nfmax, NULL, NULL,
 			"Set max N factor for mining scrypt-chacha and N-Scrypt coins (" MIN_NFACTOR_STR " to " MAX_NFACTOR_STR ")"),
+	OPT_WITH_ARG("--fixed-nfactor",
+			set_int_range, opt_show_intval, &opt_fixed_nfactor,
+			"Use a fixed Nfactor for scrypt-chacha mining (4 to 40, 0 = dynamic)"),
 #endif
 	OPT_WITHOUT_ARG("--no-adl",
 			opt_set_bool, &opt_noadl,
@@ -4212,6 +4218,8 @@ void write_config(FILE *fcfg)
 			fprintf(fcfg, "\n\t\t\"nfmax\" : \"%d\",", *pools[i]->sc_maxn);
 		if (pools[i]->sc_starttime)
 			fprintf(fcfg, "\n\t\t\"starttime\" : \"%ld\",", *pools[i]->sc_starttime);
+		if (opt_fixed_nfactor > 0)
+			fprintf(fcfg, "\n\t\t\"fixed-nfactor\" : \"%d\",", opt_fixed_nfactor);
 		fprintf(fcfg, "\n\t\t\"user\" : \"%s\",", json_escape(pools[i]->rpc_user));
 		fprintf(fcfg, "\n\t\t\"pass\" : \"%s\"\n\t}", json_escape(pools[i]->rpc_pass));
 		}

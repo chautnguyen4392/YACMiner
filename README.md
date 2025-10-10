@@ -144,6 +144,7 @@ Options for both config file and command line:
 	--net-delay         Impose small delays in networking to not overload slow routers
 	--nfmin <arg>       Set min N factor for mining scrypt-chacha coins (4 to 40)
 	--nfmax <arg>       Set max N factor for mining scrypt-chacha coins (4 to 40)
+	--fixed-nfactor <arg> Use a fixed Nfactor for scrypt-chacha mining (4 to 40, 0 = dynamic, default: 21)
 	--no-submit-stale   Don't submit shares if they are detected as stale
 	--nscrypt           Use the adaptive N-Factor scrypt algorithm for mining
 	--pass|-p <arg>     Password for bitcoin JSON-RPC server
