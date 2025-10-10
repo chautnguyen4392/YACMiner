@@ -91,7 +91,7 @@ bool opt_compact;
 const int opt_cutofftemp = 95;
 int opt_log_interval = 5;
 int opt_queue = 1;
-int opt_scantime = 15;
+int opt_scantime = 60;
 int opt_expiry = 60;
 static const bool opt_time = true;
 unsigned long long global_hashrate;
@@ -6120,7 +6120,7 @@ static void hash_sole_work(struct thr_info *mythr)
 		/* Dynamically adjust the working diff even if the target
 		 * diff is very high to ensure we can still validate scrypt is
 		 * returning shares. */
-		if (opt_scrypt) {
+		if (opt_scrypt && !opt_scrypt_chacha) {
 			double wu;
 
 			wu = total_diff1 / total_secs * 60;
@@ -6772,7 +6772,7 @@ static void *watchpool_thread(void __maybe_unused *userdata)
  * the screen at regular intervals, and restarts threads if they appear to have
  * died. */
 #define WATCHDOG_INTERVAL		2
-#define WATCHDOG_SICK_TIME		120
+#define WATCHDOG_SICK_TIME		300
 #define WATCHDOG_DEAD_TIME		600
 #define WATCHDOG_SICK_COUNT		(WATCHDOG_SICK_TIME/WATCHDOG_INTERVAL)
 #define WATCHDOG_DEAD_COUNT		(WATCHDOG_DEAD_TIME/WATCHDOG_INTERVAL)
