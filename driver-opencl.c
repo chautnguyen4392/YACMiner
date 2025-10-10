@@ -1325,9 +1325,9 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 		//sc_currentn = GetNfactor(timestamp);
 		blk->work->pool->sc_lastnfactor = GetNfactor(timestamp, minn, maxn, starttime);
 		sc_currentn = blk->work->pool->sc_lastnfactor;
-        nfactor = blk->work->pool->sc_lastnfactor +1;
+        nfactor = blk->work->pool->sc_lastnfactor;
     
-		N = (1 << nfactor);
+		N = (1 << (nfactor + 1));
 	}
 
 	le_target = *(cl_uint *)(blk->work->target + 28);
@@ -1814,7 +1814,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 
 		global_work_offset[0] = work->blk.nonce;
 		if (opt_scrypt_chacha)
-			applog(LOG_DEBUG, "Nonce: %x, Global work size: %x, local work size: %x", work->blk.nonce, (unsigned)globalThreads[0], (unsigned)localThreads[0]);
+		applog(LOG_DEBUG, "Nonce: %d, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
 		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, global_work_offset,
 						globalThreads, localThreads, 0,  NULL, NULL);
 	} else

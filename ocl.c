@@ -334,9 +334,11 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		applog(LOG_ERR, "Error %d: Failed to clGetDeviceInfo when trying to get CL_DEVICE_EXTENSIONS", status);
 		return NULL;
 	}
+	applog(LOG_DEBUG, "Device Extensions: %s", extensions);
 	find = strstr(extensions, camo);
 	if (find)
 		clState->hasBitAlign = true;
+	applog(LOG_DEBUG, "Has Bit Align: %d", clState->hasBitAlign);
 		
 	/* Check for OpenCL >= 1.0 support, needed for global offset parameter usage. */
 	char * devoclver = malloc(1024);
@@ -348,6 +350,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		applog(LOG_ERR, "Error %d: Failed to clGetDeviceInfo when trying to get CL_DEVICE_VERSION", status);
 		return NULL;
 	}
+	applog(LOG_DEBUG, "Device Version: %s", devoclver);
 	find = strstr(devoclver, ocl10);
 	if (!find) {
 		clState->hasOpenCL11plus = true;
@@ -355,6 +358,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		if (!find)
 			clState->hasOpenCL12plus = true;
 	}
+	applog(LOG_DEBUG, "hasOpenCL11plus: %d", clState->hasOpenCL11plus);
+	applog(LOG_DEBUG, "hasOpenCL12plus: %d", clState->hasOpenCL12plus);
 
 	status = clGetDeviceInfo(devices[gpu], CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT, sizeof(cl_uint), (void *)&preferred_vwidth, NULL);
 	if (status != CL_SUCCESS) {
@@ -376,6 +381,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	applog(LOG_ERR, "Error %d: Failed to clGetDeviceInfo when trying to get CL_DEVICE_MAX_COMPUTE_UNITS", status);
 	return NULL;
 	}
+	applog(LOG_DEBUG, "Max Compute units: %d", (int)(compute_units));
+
 	// AMD architechture got 64 compute shaders per compute unit.
 	// Source: http://www.amd.com/us/Documents/GCN_Architecture_whitepaper.pdf
 	clState->compute_shaders = compute_units * 64;
@@ -513,6 +520,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	else
 		clState->wsize = (clState->max_work_size <= 256 ? clState->max_work_size : 256) / clState->vwidth;
 	cgpu->work_size = clState->wsize;
+	applog(LOG_DEBUG, "Work size: %d", (int)(clState->wsize));
 
 #ifdef USE_SCRYPT
 	if (opt_scrypt) {
@@ -557,6 +565,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	char **binaries;
 	int pl;
 	char *source = file_contents(filename, &pl);
+	applog(LOG_DEBUG, "filename: %s", filename);
 	size_t sourceSize[] = {(size_t)pl};
 	cl_uint slot, cpnd;
 
@@ -595,6 +604,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	strcat(binaryfilename, ".bin");
 
 	binaryfile = fopen(binaryfilename, "rb");
+	applog(LOG_DEBUG, "binaryfilename: %s", binaryfilename);
 	if (!binaryfile) {
 		applog(LOG_DEBUG, "No binary found, generating from source");
 	} else {
@@ -872,7 +882,7 @@ built:
 						gpu, (long unsigned int)(cgpu->max_alloc));
 			applog(LOG_WARNING, "Your scrypt settings come to %d", (int)bufsize);
 		}
-		applog(LOG_INFO, "Creating scrypt buffer sized %d", (int)bufsize);
+		applog(LOG_INFO, "Creating scrypt buffer sized %lu", (unsigned long)(bufsize));
 		clState->padbufsize = bufsize;
 
 		/* This buffer is weird and might work to some degree even if
