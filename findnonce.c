@@ -18,6 +18,7 @@
 
 #include "findnonce.h"
 #include "scrypt.h"
+#include "scrypt-jane.h"
 
 const uint32_t SHA256_K[64] = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -201,8 +202,30 @@ static void *postcalc_hash(void *userdata)
 	for (entry = 0; entry < pcd->res[found]; entry++) {
 		uint32_t nonce = pcd->res[entry];
 
-		applog(LOG_DEBUG, "OCL NONCE %u found in slot %d", nonce, entry);
-		submit_nonce(thr, pcd->work, nonce);
+		//  If opt_scrypt_chacha is true, submit only the first nonce; other nonces are logged.
+		if (opt_scrypt_chacha) {
+			/* Log Data array and Nonce for scrypt-chacha */
+			uint32_t data[20];
+
+			/* Prepare data array like in sc_scrypt_regenhash */
+			sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 19);
+			data[19] = htobe32(nonce);
+
+			/* Print data array as hex string */
+			char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
+
+			if (entry == 0) {
+				applog(LOG_DEBUG, "SUBMITTING, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+				submit_nonce(thr, pcd->work, nonce);
+			} else {
+				applog(LOG_DEBUG, "LOGGING ONLY, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+			}
+
+			free(data_hex);
+		} else {
+			applog(LOG_DEBUG, "OCL NONCE %u found in slot %d", nonce, entry);
+			submit_nonce(thr, pcd->work, nonce);
+		}
 	}
 
 	discard_work(pcd->work);
