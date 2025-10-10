@@ -1330,7 +1330,7 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 		N = (1 << nfactor);
 	}
 
-	le_target = *(cl_uint *)(blk->work->device_target + 28);
+	le_target = *(cl_uint *)(blk->work->target + 28);
 
 	if (!opt_scrypt_chacha) {
 		clState->cldata = blk->work->data;
