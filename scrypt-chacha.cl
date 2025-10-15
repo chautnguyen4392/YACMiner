@@ -709,3 +709,43 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	if (result)
 		SETFOUND(gid);
 }
+
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void search84(__global const uint4 * restrict input,
+volatile __global uint * restrict output, __global uchar * restrict padcache,
+const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
+{
+	uint4 password[6];  // 6 uint4s = 24 bytes, but we only use 21 bytes (84 bytes total)
+	uint4 X[8];
+	uint output_hash[8] __attribute__ ((aligned (16)));
+	const uint gid = get_global_id(0);
+	uint Nfactor = 0;
+	uint tmp = N >> 1;
+	
+	/* Determine the Nfactor */
+	while ((tmp & 1) == 0) {
+		tmp >>= 1;
+		Nfactor++;
+	}
+	
+	password[0] = input[0];
+	password[1] = input[1];
+	password[2] = input[2];
+	password[3] = input[3];
+	password[4] = input[4];
+	password[5] = input[5];
+	password[5].w = gid;  // Nonce is now in password[5].w
+	
+	/* 1: X = PBKDF2(password, salt) */
+	scrypt_pbkdf2_128B(password, password, X);
+
+	/* 2: X = ROMix(X) */
+	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
+
+	/* 3: Out = PBKDF2(password, X) */
+	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
+	
+	bool result = (output_hash[7] <= target);
+	if (result)
+		SETFOUND(gid);
+}

@@ -205,20 +205,33 @@ static void *postcalc_hash(void *userdata)
 		//  If opt_scrypt_chacha is true, submit only the first nonce; other nonces are logged.
 		if (opt_scrypt_chacha) {
 			/* Log Data array and Nonce for scrypt-chacha */
-			uint32_t data[20];
+			uint32_t data[21];
 
 			/* Prepare data array like in sc_scrypt_regenhash */
-			sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 19);
-			data[19] = htobe32(nonce);
+			if (opt_scrypt_chacha_84) {
+				sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 20);
+				data[20] = htobe32(nonce);
+			} else {
+				sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 19);
+				data[19] = htobe32(nonce);
+			}
 
 			/* Print data array as hex string */
 			char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
 
 			if (entry == 0) {
-				applog(LOG_DEBUG, "SUBMITTING, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+				if (opt_scrypt_chacha_84) {
+					applog(LOG_DEBUG, "SUBMITTING, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[20]);
+				} else {
+					applog(LOG_DEBUG, "SUBMITTING, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+				}
 				submit_nonce(thr, pcd->work, nonce);
 			} else {
-				applog(LOG_DEBUG, "LOGGING ONLY, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+				if (opt_scrypt_chacha_84) {
+					applog(LOG_DEBUG, "LOGGING ONLY, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[20]);
+				} else {
+					applog(LOG_DEBUG, "LOGGING ONLY, OCL NONCE %u found in slot %d - Data array: %s, Nonce: %u", nonce, entry, data_hex, data[19]);
+				}
 			}
 
 			free(data_hex);

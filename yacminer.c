@@ -112,6 +112,7 @@ int gpu_threads;
 #ifdef USE_SCRYPT
 bool opt_scrypt=1;
 bool opt_scrypt_chacha=0;
+bool opt_scrypt_chacha_84=0;
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
@@ -1019,6 +1020,14 @@ static char *set_null(const char __maybe_unused *arg)
 	return NULL;
 }
 
+static char *set_scrypt_chacha_84(void)
+{
+	opt_scrypt_chacha_84 = true;
+	opt_scrypt = true;
+	opt_scrypt_chacha = true;
+	return NULL;
+}
+
 unsigned char Get_SC_Nfactor(unsigned int nTimestamp, int minn, int maxn, long starttime) {
     int l = 0;
 
@@ -1378,6 +1387,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt-chacha",
 			opt_set_bool, &opt_scrypt_chacha,
 			"Use the scrypt-chacha algorithm for mining (aka scrypt-jane)"),
+	OPT_WITHOUT_ARG("--scrypt-chacha-84",
+			set_scrypt_chacha_84, NULL,
+			"Use the scrypt-chacha algorithm for mining with 84-byte block headers (8-byte timestamp)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),
@@ -3349,7 +3361,7 @@ static void roll_work(struct work *work)
 	uint32_t *work_ntime;
 	uint32_t ntime;
 
-	work_ntime = (uint32_t *)(work->data + 68);
+	work_ntime = (uint32_t *)(work->data + (opt_scrypt_chacha_84 ? 68 : 68));
 	ntime = be32toh(*work_ntime);
 	ntime++;
 	*work_ntime = htobe32(ntime);
@@ -5408,7 +5420,7 @@ static void *stratum_sthread(void *userdata)
 		sshare->sshare_time = time(NULL);
 		/* This work item is freed in parse_stratum_response */
 		sshare->work = work;
-		nonce = *((uint32_t *)(work->data + 76));
+		nonce = *((uint32_t *)(work->data + (opt_scrypt_chacha_84 ? 80 : 76)));
 		noncehex = bin2hex((const unsigned char *)&nonce, 4);
 		memset(s, 0, 1024);
 
