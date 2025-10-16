@@ -597,6 +597,15 @@ scrypt_pbkdf2_128B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		for (i = 0; i < 4; i++) {
 			out4[i + 4] = ti4[i];
 		}
+		
+	// Debug: Log PBKDF2_80 output for all threads
+	const uint gid = get_global_id(0);
+	printf("PBKDF2_80[%u]: out4[0-3]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
+		gid, out4[0].x, out4[0].y, out4[0].z, out4[0].w,
+		out4[1].x, out4[1].y, out4[1].z, out4[1].w);
+	printf("PBKDF2_80[%u]: out4[4-7]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
+		gid, out4[2].x, out4[2].y, out4[2].z, out4[2].w,
+		out4[3].x, out4[3].y, out4[3].z, out4[3].w);
 }
 
 static void
@@ -660,6 +669,15 @@ scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		for (i = 0; i < 4; i++) {
 			out4[i + 4] = ti4[i];
 		}
+		
+	// Debug: Log PBKDF2_84 output for all threads
+	const uint gid = get_global_id(0);
+	printf("PBKDF2_84[%u]: out4[0-3]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
+		gid, out4[0].x, out4[0].y, out4[0].z, out4[0].w,
+		out4[1].x, out4[1].y, out4[1].z, out4[1].w);
+	printf("PBKDF2_84[%u]: out4[4-7]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
+		gid, out4[2].x, out4[2].y, out4[2].z, out4[2].w,
+		out4[3].x, out4[3].y, out4[3].z, out4[3].w);
 }
 
 __constant uint4 MASK_2 = (uint4) (1, 2, 3, 0);
@@ -889,18 +907,60 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	password[4] = input[4];
 	password[4].w = gid;
 	
+	// Debug: Log input data for all threads
+	printf("KERNEL80[%u]: Input[0]=%08x%08x%08x%08x, Input[1]=%08x%08x%08x%08x\n", 
+		gid, password[0].x, password[0].y, password[0].z, password[0].w,
+		password[1].x, password[1].y, password[1].z, password[1].w);
+	printf("KERNEL80[%u]: Input[2]=%08x%08x%08x%08x, Input[3]=%08x%08x%08x%08x\n", 
+		gid, password[2].x, password[2].y, password[2].z, password[2].w,
+		password[3].x, password[3].y, password[3].z, password[3].w);
+	printf("KERNEL80[%u]: Input[4]=%08x%08x%08x%08x, Nfactor=%u, N=%u, target=%08x\n", 
+		gid, password[4].x, password[4].y, password[4].z, password[4].w, Nfactor, N, target);
+	
 	/* 1: X = PBKDF2(password, salt) */
 	scrypt_pbkdf2_128B(password, password, X);
+
+	// Debug: Log PBKDF2 output for all threads
+	printf("KERNEL80[%u]: PBKDF2_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
+		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+	printf("KERNEL80[%u]: PBKDF2_X[2]=%08x%08x%08x%08x, X[3]=%08x%08x%08x%08x\n", 
+		gid, X[2].x, X[2].y, X[2].z, X[2].w, X[3].x, X[3].y, X[3].z, X[3].w);
+	printf("KERNEL80[%u]: PBKDF2_X[4]=%08x%08x%08x%08x, X[5]=%08x%08x%08x%08x\n", 
+		gid, X[4].x, X[4].y, X[4].z, X[4].w, X[5].x, X[5].y, X[5].z, X[5].w);
+	printf("KERNEL80[%u]: PBKDF2_X[6]=%08x%08x%08x%08x, X[7]=%08x%08x%08x%08x\n", 
+		gid, X[6].x, X[6].y, X[6].z, X[6].w, X[7].x, X[7].y, X[7].z, X[7].w);
 
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
 
+	// Debug: Log ROMix output for all threads
+	printf("KERNEL80[%u]: ROMix_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
+		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
 	
+	// Debug: Log final output for all threads
+	printf("KERNEL80[%u]: Final_hash[0]=%08x%08x%08x%08x, hash[1]=%08x%08x%08x%08x\n", 
+		gid, output_hash[0], output_hash[1], output_hash[2], output_hash[3],
+		output_hash[4], output_hash[5], output_hash[6], output_hash[7]);
+	printf("KERNEL80[%u]: hash[7]=%08x, target=%08x, result=%s\n", 
+		gid, output_hash[7], target, (output_hash[7] <= target) ? "FOUND" : "not found");
+	
 	bool result = (output_hash[7] <= target);
-	if (result)
-		SETFOUND(gid);
+	// Note: We don't use SETFOUND(gid) anymore since we only want to output the hash
+	
+	// Always output the hash for debugging (regardless of target)
+	// Output format: [HASH_0][HASH_1][HASH_2][HASH_3][HASH_4][HASH_5][HASH_6][HASH_7]
+	// Use fixed positions starting from index 0
+	output[0] = output_hash[0];
+	output[1] = output_hash[1];
+	output[2] = output_hash[2];
+	output[3] = output_hash[3];
+	output[4] = output_hash[4];
+	output[5] = output_hash[5];
+	output[6] = output_hash[6];
+	output[7] = output_hash[7];
 }
 
 // New kernel for 84-byte block header (with 8-byte timestamp)
@@ -931,16 +991,60 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
 	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
 	
+	// Debug: Log input data for all threads
+	printf("KERNEL84[%u]: Input[0]=%08x%08x%08x%08x, Input[1]=%08x%08x%08x%08x\n", 
+		gid, password[0].x, password[0].y, password[0].z, password[0].w,
+		password[1].x, password[1].y, password[1].z, password[1].w);
+	printf("KERNEL84[%u]: Input[2]=%08x%08x%08x%08x, Input[3]=%08x%08x%08x%08x\n", 
+		gid, password[2].x, password[2].y, password[2].z, password[2].w,
+		password[3].x, password[3].y, password[3].z, password[3].w);
+	printf("KERNEL84[%u]: Input[4]=%08x%08x%08x%08x, Input[5]=%08x\n", 
+		gid, password[4].x, password[4].y, password[4].z, password[4].w,
+		password[5].x);
+	printf("KERNEL84[%u]: Nfactor=%u, N=%u, target=%08x\n", gid, Nfactor, N, target);
+	
 	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
 	scrypt_pbkdf2_128B_84(password, password, X);
+
+	// Debug: Log PBKDF2 output for all threads
+	printf("KERNEL84[%u]: PBKDF2_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
+		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+	printf("KERNEL84[%u]: PBKDF2_X[2]=%08x%08x%08x%08x, X[3]=%08x%08x%08x%08x\n", 
+		gid, X[2].x, X[2].y, X[2].z, X[2].w, X[3].x, X[3].y, X[3].z, X[3].w);
+	printf("KERNEL84[%u]: PBKDF2_X[4]=%08x%08x%08x%08x, X[5]=%08x%08x%08x%08x\n", 
+		gid, X[4].x, X[4].y, X[4].z, X[4].w, X[5].x, X[5].y, X[5].z, X[5].w);
+	printf("KERNEL84[%u]: PBKDF2_X[6]=%08x%08x%08x%08x, X[7]=%08x%08x%08x%08x\n", 
+		gid, X[6].x, X[6].y, X[6].z, X[6].w, X[7].x, X[7].y, X[7].z, X[7].w);
 
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
 
+	// Debug: Log ROMix output for all threads
+	printf("KERNEL84[%u]: ROMix_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
+		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
 	
+	// Debug: Log final output for all threads
+	printf("KERNEL84[%u]: Final_hash[0]=%08x%08x%08x%08x, hash[1]=%08x%08x%08x%08x\n", 
+		gid, output_hash[0], output_hash[1], output_hash[2], output_hash[3],
+		output_hash[4], output_hash[5], output_hash[6], output_hash[7]);
+	printf("KERNEL84[%u]: hash[7]=%08x, target=%08x, result=%s\n", 
+		gid, output_hash[7], target, (output_hash[7] <= target) ? "FOUND" : "not found");
+	
 	bool result = (output_hash[7] <= target);
-	if (result)
-		SETFOUND(gid);
+	// Note: We don't use SETFOUND(gid) anymore since we only want to output the hash
+	
+	// Always output the hash for debugging (regardless of target)
+	// Output format: [HASH_0][HASH_1][HASH_2][HASH_3][HASH_4][HASH_5][HASH_6][HASH_7]
+	// Use fixed positions starting from index 0
+	output[0] = output_hash[0];
+	output[1] = output_hash[1];
+	output[2] = output_hash[2];
+	output[3] = output_hash[3];
+	output[4] = output_hash[4];
+	output[5] = output_hash[5];
+	output[6] = output_hash[6];
+	output[7] = output_hash[7];
 }

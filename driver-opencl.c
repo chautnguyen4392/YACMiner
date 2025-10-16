@@ -10,6 +10,7 @@
  */
 
 #include "config.h"
+#include <stddef.h>
 
 #ifdef HAVE_CURSES
 #include <curses.h>
@@ -1347,11 +1348,76 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 		// Initialize the data array to zero
 		memset(data, 0, sizeof(data));
 
+		// Additional debug for 84-byte headers
+		if (opt_scrypt_chacha_84) {
+			applog(LOG_DEBUG, "SCRYPT84_LE: Using 84-byte header");
+			// Log the input data that was sent to the kernel
+			const uint32_t *input_data = (const uint32_t *)blk->work->data;
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[0-3]: %08x%08x%08x%08x", 
+				input_data[0], input_data[1], input_data[2], input_data[3]);
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[4-7]: %08x%08x%08x%08x", 
+				input_data[4], input_data[5], input_data[6], input_data[7]);
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[8-11]: %08x%08x%08x%08x", 
+				input_data[8], input_data[9], input_data[10], input_data[11]);
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[12-15]: %08x%08x%08x%08x", 
+				input_data[12], input_data[13], input_data[14], input_data[15]);
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[16-19]: %08x%08x%08x%08x", 
+				input_data[16], input_data[17], input_data[18], input_data[19]);
+			applog(LOG_DEBUG, "SCRYPT84_LE: Input data[20]: %08x (nonce position)", input_data[20]);
+		} else {
+			applog(LOG_DEBUG, "SCRYPT80_LE: Using 80-byte header");
+			// Log the input data that was sent to the kernel
+			const uint32_t *input_data = (const uint32_t *)blk->work->data;
+			applog(LOG_DEBUG, "SCRYPT80_LE: Input data[0-3]: %08x%08x%08x%08x", 
+				input_data[0], input_data[1], input_data[2], input_data[3]);
+			applog(LOG_DEBUG, "SCRYPT80_LE: Input data[4-7]: %08x%08x%08x%08x", 
+				input_data[4], input_data[5], input_data[6], input_data[7]);
+			applog(LOG_DEBUG, "SCRYPT80_LE: Input data[8-11]: %08x%08x%08x%08x", 
+				input_data[8], input_data[9], input_data[10], input_data[11]);
+			applog(LOG_DEBUG, "SCRYPT80_LE: Input data[12-15]: %08x%08x%08x%08x", 
+				input_data[12], input_data[13], input_data[14], input_data[15]);
+			applog(LOG_DEBUG, "SCRYPT80_LE: Input data[16-19]: %08x%08x%08x%08x", 
+				input_data[16], input_data[17], input_data[18], input_data[19]);
+		}
+
 		if (opt_scrypt_chacha_84) {
 			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 21);
 		} else {
 			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
 		}
+
+		// Additional debug for 84-byte headers
+		if (opt_scrypt_chacha_84) {
+			applog(LOG_DEBUG, "SCRYPT84_BE: Using 84-byte header");
+			// Log the input data that was sent to the kernel
+			const uint32_t *input_data = (const uint32_t *)data;
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[0-3]: %08x%08x%08x%08x", 
+				input_data[0], input_data[1], input_data[2], input_data[3]);
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[4-7]: %08x%08x%08x%08x", 
+				input_data[4], input_data[5], input_data[6], input_data[7]);
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[8-11]: %08x%08x%08x%08x", 
+				input_data[8], input_data[9], input_data[10], input_data[11]);
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[12-15]: %08x%08x%08x%08x", 
+				input_data[12], input_data[13], input_data[14], input_data[15]);
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[16-19]: %08x%08x%08x%08x", 
+				input_data[16], input_data[17], input_data[18], input_data[19]);
+			applog(LOG_DEBUG, "SCRYPT84_BE: Input data[20]: %08x (nonce position)", input_data[20]);
+		} else {
+			applog(LOG_DEBUG, "SCRYPT80_BE: Using 80-byte header");
+			// Log the input data that was sent to the kernel
+			const uint32_t *input_data = (const uint32_t *)data;
+			applog(LOG_DEBUG, "SCRYPT80_BE: Input data[0-3]: %08x%08x%08x%08x", 
+				input_data[0], input_data[1], input_data[2], input_data[3]);
+			applog(LOG_DEBUG, "SCRYPT80_BE: Input data[4-7]: %08x%08x%08x%08x", 
+				input_data[4], input_data[5], input_data[6], input_data[7]);
+			applog(LOG_DEBUG, "SCRYPT80_BE: Input data[8-11]: %08x%08x%08x%08x", 
+				input_data[8], input_data[9], input_data[10], input_data[11]);
+			applog(LOG_DEBUG, "SCRYPT80_BE: Input data[12-15]: %08x%08x%08x%08x", 
+				input_data[12], input_data[13], input_data[14], input_data[15]);
+			applog(LOG_DEBUG, "SCRYPT80_BE: Input data[16-19]: %08x%08x%08x%08x", 
+				input_data[16], input_data[17], input_data[18], input_data[19]);
+		}
+
 		/* Print data array as hex string */
 		char *data_hex = bin2hex((unsigned char *)data, buffer_size);
 		applog(LOG_DEBUG, "Data array: %s, Timestamp: %d, Nfactor: %d, Target: %x", data_hex, timestamp, nfactor, le_target);
@@ -1860,9 +1926,10 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	{
 		uint32_t *o = thrdata->res;
 		uint32_t target = *(uint32_t *)(work->target + 28);
-		applog(LOG_DEBUG, "Nonce: %u, Output buffer: %x %x %x %x %x %x %x %x Target: %x", work->blk.nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], target);
+		applog(LOG_DEBUG, "Nonce: %u, Output buffer: %x %x %x %x %x %x %x %x Target: %08x", work->blk.nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], target);
 	}
 	
+	uint32_t nonce = work->blk.nonce;
 	/* The amount of work scanned can fluctuate when intensity changes
 	 * and since we do this one cycle behind, we increment the work more
 	 * than enough to prevent repeating work */
@@ -1881,21 +1948,64 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	/* This finish flushes the readbuffer set with CL_FALSE in clEnqueueReadBuffer */
 	clFinish(clState->commandQueue);
 
-	/* FOUND entry is used as a counter to say how many nonces exist */
-	if (thrdata->res[found]) {
-		/* Clear the buffer again */
-		status = clEnqueueWriteBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
-					      buffersize, blank_res, 0, NULL, NULL);
-		if (unlikely(status != CL_SUCCESS)) {
-			applog(LOG_ERR, "Error: clEnqueueWriteBuffer failed.");
-			return -1;
-		}
-		applog(LOG_DEBUG, "GPU %d found something?", gpu->device_id);
-		postcalc_hash_async(thr, work, thrdata->res);
+	// Calculate expected scrypt hash using CPU implementation for comparison
+	if (opt_scrypt_chacha) {
+		struct work *work_clone = copy_work(work);  // Properly copy the work structure
+		uint32_t *work_nonce = (uint32_t *)(work_clone->data + (opt_scrypt_chacha_84 ? 80 : 76));
+		*work_nonce = htobe32(nonce);  // Use the current nonce from work
+		
+		// Calculate hash using sc_scrypt_regenhash
+		sc_scrypt_regenhash(work_clone);
+		
+		// Log the CPU expected hash
+		uint32_t *ohash = (uint32_t *)(work_clone->hash);
+		char *expected_hex_LE = bin2hex((unsigned char *)ohash, 32);
+		applog(LOG_DEBUG, "CPU Expected hash (LE): %s, Nonce: %u", expected_hex_LE, nonce);
+		free(expected_hex_LE);
+
+		uint32_t ohash_be[8];
+		swab256(ohash_be, ohash);
+		char *expected_hex_BE = bin2hex((unsigned char *)ohash_be, 32);
+		applog(LOG_DEBUG, "CPU Expected hash (BE): %s, Nonce: %u", expected_hex_BE, nonce);
+		free(expected_hex_BE);
+		
+		// Always compare with GPU result (hash is always output now)
+		// GPU output format: [HASH_0][HASH_1][HASH_2][HASH_3][HASH_4][HASH_5][HASH_6][HASH_7]
+		// Hash starts at index 0 (no FOUND counter anymore)
+		uint32_t *gpu_hash = &thrdata->res[0]; // Hash starts at index 0
+		char *gpu_hex_LE = bin2hex((unsigned char *)gpu_hash, 32);
+		applog(LOG_DEBUG, "GPU Result (LE): Hash: %s, Nonce: %u", gpu_hex_LE, nonce);
+		free(gpu_hex_LE);
+
+		uint32_t gpu_hash_be[8];
+		swab256(gpu_hash_be, gpu_hash);
+		char *gpu_hex_BE = bin2hex((unsigned char *)gpu_hash_be, 32);
+		applog(LOG_DEBUG, "GPU Result (BE): Hash: %s, Nonce: %u", gpu_hex_BE, nonce);
+		free(gpu_hex_BE);
+		
+		// Check if hashes match
+		bool hashes_match = (memcmp(ohash_be, gpu_hash_be, 32) == 0);
+		applog(LOG_DEBUG, "Hash comparison: %s", hashes_match ? "MATCH" : "MISMATCH");
 		memset(thrdata->res, 0, buffersize);
-		/* This finish flushes the writebuffer set with CL_FALSE in clEnqueueWriteBuffer */
-		clFinish(clState->commandQueue);
+		// Free the cloned work structure
+		free_work(work_clone);
 	}
+	
+	/* FOUND entry is used as a counter to say how many nonces exist */
+	// if (thrdata->res[found]) {
+	// 	/* Clear the buffer again */
+	// 	status = clEnqueueWriteBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
+	// 				      buffersize, blank_res, 0, NULL, NULL);
+	// 	if (unlikely(status != CL_SUCCESS)) {
+	// 		applog(LOG_ERR, "Error: clEnqueueWriteBuffer failed.");
+	// 		return -1;
+	// 	}
+	// 	applog(LOG_DEBUG, "GPU %d found something?", gpu->device_id);
+	// 	postcalc_hash_async(thr, work, thrdata->res);
+	// 	memset(thrdata->res, 0, buffersize);
+	// 	/* This finish flushes the writebuffer set with CL_FALSE in clEnqueueWriteBuffer */
+	// 	clFinish(clState->commandQueue);
+	// }
 
 	return hashes;
 }
