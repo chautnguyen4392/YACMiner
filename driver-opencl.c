@@ -1338,20 +1338,27 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 	}
 
 	le_target = *(cl_uint *)(blk->work->target + 28);
+	applog(LOG_DEBUG, "TACA ===> queue_scrypt_kernel, le_target: %x", le_target);
 
+	int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
 	if (!opt_scrypt_chacha) {
 		clState->cldata = blk->work->data;
 	} else {
-		applog(LOG_DEBUG, "Timestamp: %d, Nfactor: %d, Target: %x", timestamp, nfactor, le_target);
+		// Initialize the data array to zero
+		memset(data, 0, sizeof(data));
+
 		if (opt_scrypt_chacha_84) {
-			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 21);
 		} else {
-			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 19);
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
 		}
+		/* Print data array as hex string */
+		char *data_hex = bin2hex((unsigned char *)data, buffer_size);
+		applog(LOG_DEBUG, "Data array: %s, Timestamp: %d, Nfactor: %d, Target: %x", data_hex, timestamp, nfactor, le_target);
+		free(data_hex);
 		clState->cldata = data;
 	}
-        
-	int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
+
 	status = clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, buffer_size, clState->cldata, 0, NULL,NULL);
 
 	CL_SET_ARG(clState->CLbuffer0);

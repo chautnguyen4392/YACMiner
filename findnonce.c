@@ -205,19 +205,20 @@ static void *postcalc_hash(void *userdata)
 		//  If opt_scrypt_chacha is true, submit only the first nonce; other nonces are logged.
 		if (opt_scrypt_chacha) {
 			/* Log Data array and Nonce for scrypt-chacha */
-			uint32_t data[21];
+			uint32_t data[21];  // Max size for 84-byte header (21 uint32s)
 
 			/* Prepare data array like in sc_scrypt_regenhash */
 			if (opt_scrypt_chacha_84) {
 				sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 20);
-				data[20] = htobe32(nonce);
+				data[20] = htobe32(htobe32(nonce));
 			} else {
 				sj_be32enc_vect(data, (const uint32_t *)pcd->work->data, 19);
-				data[19] = htobe32(nonce);
+				data[19] = htobe32(htobe32(nonce));
 			}
 
 			/* Print data array as hex string */
-			char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
+			int data_size = opt_scrypt_chacha_84 ? 84 : 80;  // 84 bytes or 80 bytes
+			char *data_hex = bin2hex((unsigned char *)data, data_size);
 
 			if (entry == 0) {
 				if (opt_scrypt_chacha_84) {
