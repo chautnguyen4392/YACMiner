@@ -563,6 +563,7 @@ __constant uint be2 = 0x02000000;
 
 static void
 scrypt_pbkdf2_128B(const uint4 *password, const uint4 *salt, uint4 *out4) {
+	const uint gid = get_global_id(0);
 	scrypt_hmac_state hmac_pw, work;
 	uint4 ti4[4];
 	uint i;
@@ -571,9 +572,132 @@ scrypt_pbkdf2_128B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 
 	/* hmac(password, ...) */
 	scrypt_hmac_init(&hmac_pw, password);
+	{
+		// Debug: Log the HMAC state (not buffer) after initialization - full 25 uint32 values
+		const uint4 *inner_state = (const uint4 *)hmac_pw.inner.state4;
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[0].x, inner_state[0].y, inner_state[0].z, inner_state[0].w,
+			inner_state[1].x, inner_state[1].y, inner_state[1].z, inner_state[1].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[2].x, inner_state[2].y, inner_state[2].z, inner_state[2].w,
+			inner_state[3].x, inner_state[3].y, inner_state[3].z, inner_state[3].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[4].x, inner_state[4].y, inner_state[4].z, inner_state[4].w,
+			inner_state[5].x, inner_state[5].y, inner_state[5].z, inner_state[5].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[6].x, inner_state[6].y, inner_state[6].z, inner_state[6].w,
+			inner_state[7].x, inner_state[7].y, inner_state[7].z, inner_state[7].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[8].x, inner_state[8].y, inner_state[8].z, inner_state[8].w,
+			inner_state[9].x, inner_state[9].y, inner_state[9].z, inner_state[9].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[10].x, inner_state[10].y, inner_state[10].z, inner_state[10].w,
+			inner_state[11].x, inner_state[11].y, inner_state[11].z, inner_state[11].w, inner_state[12].x);
+
+		const uint4 *outer_state = (const uint4 *)hmac_pw.outer.state4;
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[0].x, outer_state[0].y, outer_state[0].z, outer_state[0].w,
+			outer_state[1].x, outer_state[1].y, outer_state[1].z, outer_state[1].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[2].x, outer_state[2].y, outer_state[2].z, outer_state[2].w,
+			outer_state[3].x, outer_state[3].y, outer_state[3].z, outer_state[3].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[4].x, outer_state[4].y, outer_state[4].z, outer_state[4].w,
+			outer_state[5].x, outer_state[5].y, outer_state[5].z, outer_state[5].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[6].x, outer_state[6].y, outer_state[6].z, outer_state[6].w,
+			outer_state[7].x, outer_state[7].y, outer_state[7].z, outer_state[7].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[8].x, outer_state[8].y, outer_state[8].z, outer_state[8].w,
+			outer_state[9].x, outer_state[9].y, outer_state[9].z, outer_state[9].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[10].x, outer_state[10].y, outer_state[10].z, outer_state[10].w,
+			outer_state[11].x, outer_state[11].y, outer_state[11].z, outer_state[11].w, outer_state[12].x);
+
+		// Debug: Log the HMAC buffer after initialization - 72 bytes (18 uint32 values)
+		const uint4 *inner_buffer = (const uint4 *)hmac_pw.inner.buffer4;
+		printf("PBKDF2_80[%u]: HMAC_INIT innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[0].x, inner_buffer[0].y, inner_buffer[0].z, inner_buffer[0].w,
+			inner_buffer[1].x, inner_buffer[1].y, inner_buffer[1].z, inner_buffer[1].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[2].x, inner_buffer[2].y, inner_buffer[2].z, inner_buffer[2].w,
+			inner_buffer[3].x, inner_buffer[3].y, inner_buffer[3].z, inner_buffer[3].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT innerbuffer[8-11]: %08x%08x\n", gid, inner_buffer[4].x, inner_buffer[4].y);
+
+		const uint4 *outer_buffer = (const uint4 *)hmac_pw.outer.buffer4;
+		printf("PBKDF2_80[%u]: HMAC_INIT outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[0].x, outer_buffer[0].y, outer_buffer[0].z, outer_buffer[0].w,
+			outer_buffer[1].x, outer_buffer[1].y, outer_buffer[1].z, outer_buffer[1].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[2].x, outer_buffer[2].y, outer_buffer[2].z, outer_buffer[2].w,
+			outer_buffer[3].x, outer_buffer[3].y, outer_buffer[3].z, outer_buffer[3].w);
+		printf("PBKDF2_80[%u]: HMAC_INIT outerbuffer[8-11]: %08x%08x\n", gid, outer_buffer[4].x, outer_buffer[4].y);
+	}
+
 
 	/* hmac(password, salt...) */
 	scrypt_hmac_update_80(&hmac_pw, salt);
+	{
+		// Debug: Log the HMAC state (not buffer) after update - full 25 uint32 values
+		const uint4 *inner_state = (const uint4 *)hmac_pw.inner.state4;
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[0].x, inner_state[0].y, inner_state[0].z, inner_state[0].w,
+			inner_state[1].x, inner_state[1].y, inner_state[1].z, inner_state[1].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[2].x, inner_state[2].y, inner_state[2].z, inner_state[2].w,
+			inner_state[3].x, inner_state[3].y, inner_state[3].z, inner_state[3].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[4].x, inner_state[4].y, inner_state[4].z, inner_state[4].w,
+			inner_state[5].x, inner_state[5].y, inner_state[5].z, inner_state[5].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[6].x, inner_state[6].y, inner_state[6].z, inner_state[6].w,
+			inner_state[7].x, inner_state[7].y, inner_state[7].z, inner_state[7].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[8].x, inner_state[8].y, inner_state[8].z, inner_state[8].w,
+			inner_state[9].x, inner_state[9].y, inner_state[9].z, inner_state[9].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[10].x, inner_state[10].y, inner_state[10].z, inner_state[10].w,
+			inner_state[11].x, inner_state[11].y, inner_state[11].z, inner_state[11].w, inner_state[12].x);
+
+		const uint4 *outer_state = (const uint4 *)hmac_pw.outer.state4;
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[0].x, outer_state[0].y, outer_state[0].z, outer_state[0].w,
+			outer_state[1].x, outer_state[1].y, outer_state[1].z, outer_state[1].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[2].x, outer_state[2].y, outer_state[2].z, outer_state[2].w,
+			outer_state[3].x, outer_state[3].y, outer_state[3].z, outer_state[3].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[4].x, outer_state[4].y, outer_state[4].z, outer_state[4].w,
+			outer_state[5].x, outer_state[5].y, outer_state[5].z, outer_state[5].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[6].x, outer_state[6].y, outer_state[6].z, outer_state[6].w,
+			outer_state[7].x, outer_state[7].y, outer_state[7].z, outer_state[7].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[8].x, outer_state[8].y, outer_state[8].z, outer_state[8].w,
+			outer_state[9].x, outer_state[9].y, outer_state[9].z, outer_state[9].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[10].x, outer_state[10].y, outer_state[10].z, outer_state[10].w,
+			outer_state[11].x, outer_state[11].y, outer_state[11].z, outer_state[11].w, outer_state[12].x);
+
+		// Debug: Log the HMAC buffer after update - 72 bytes (18 uint32 values)
+		const uint4 *inner_buffer = (const uint4 *)hmac_pw.inner.buffer4;
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[0].x, inner_buffer[0].y, inner_buffer[0].z, inner_buffer[0].w,
+			inner_buffer[1].x, inner_buffer[1].y, inner_buffer[1].z, inner_buffer[1].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[2].x, inner_buffer[2].y, inner_buffer[2].z, inner_buffer[2].w,
+			inner_buffer[3].x, inner_buffer[3].y, inner_buffer[3].z, inner_buffer[3].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE innerbuffer[8-11]: %08x%08x\n", gid, inner_buffer[4].x, inner_buffer[4].y);
+
+		const uint4 *outer_buffer = (const uint4 *)hmac_pw.outer.buffer4;
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[0].x, outer_buffer[0].y, outer_buffer[0].z, outer_buffer[0].w,
+			outer_buffer[1].x, outer_buffer[1].y, outer_buffer[1].z, outer_buffer[1].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[2].x, outer_buffer[2].y, outer_buffer[2].z, outer_buffer[2].w,
+			outer_buffer[3].x, outer_buffer[3].y, outer_buffer[3].z, outer_buffer[3].w);
+		printf("PBKDF2_80[%u]: HMAC_UPDATE outerbuffer[8-11]: %08x%08x\n", gid, outer_buffer[4].x, outer_buffer[4].y);
+	}
 
 		/* U1 = hmac(password, salt || be(i)) */
 		/* U32TO8_BE(be, i); */
@@ -598,8 +722,6 @@ scrypt_pbkdf2_128B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 			out4[i + 4] = ti4[i];
 		}
 		
-	// Debug: Log PBKDF2_80 output for all threads
-	const uint gid = get_global_id(0);
 	printf("PBKDF2_80[%u]: out4[0-3]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
 		gid, out4[0].x, out4[0].y, out4[0].z, out4[0].w,
 		out4[1].x, out4[1].y, out4[1].z, out4[1].w);
@@ -635,6 +757,7 @@ scrypt_pbkdf2_32B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 // New PBKDF2 functions for 84-byte input
 static void
 scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
+	const uint gid = get_global_id(0);
 	scrypt_hmac_state hmac_pw, work;
 	uint4 ti4[4];
 	uint i;
@@ -643,10 +766,131 @@ scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
 
 	/* hmac(password, ...) */
 	scrypt_hmac_init_84(&hmac_pw, password);
+	{
+		// Debug: Log the HMAC state (not buffer) after initialization - full 25 uint32 values
+		const uint4 *inner_state = (const uint4 *)hmac_pw.inner.state4;
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[0].x, inner_state[0].y, inner_state[0].z, inner_state[0].w,
+			inner_state[1].x, inner_state[1].y, inner_state[1].z, inner_state[1].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[2].x, inner_state[2].y, inner_state[2].z, inner_state[2].w,
+			inner_state[3].x, inner_state[3].y, inner_state[3].z, inner_state[3].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[4].x, inner_state[4].y, inner_state[4].z, inner_state[4].w,
+			inner_state[5].x, inner_state[5].y, inner_state[5].z, inner_state[5].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[6].x, inner_state[6].y, inner_state[6].z, inner_state[6].w,
+			inner_state[7].x, inner_state[7].y, inner_state[7].z, inner_state[7].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[8].x, inner_state[8].y, inner_state[8].z, inner_state[8].w,
+			inner_state[9].x, inner_state[9].y, inner_state[9].z, inner_state[9].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[10].x, inner_state[10].y, inner_state[10].z, inner_state[10].w,
+			inner_state[11].x, inner_state[11].y, inner_state[11].z, inner_state[11].w, inner_state[12].x);
+
+		const uint4 *outer_state = (const uint4 *)hmac_pw.outer.state4;
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[0].x, outer_state[0].y, outer_state[0].z, outer_state[0].w,
+			outer_state[1].x, outer_state[1].y, outer_state[1].z, outer_state[1].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[2].x, outer_state[2].y, outer_state[2].z, outer_state[2].w,
+			outer_state[3].x, outer_state[3].y, outer_state[3].z, outer_state[3].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[4].x, outer_state[4].y, outer_state[4].z, outer_state[4].w,
+			outer_state[5].x, outer_state[5].y, outer_state[5].z, outer_state[5].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[6].x, outer_state[6].y, outer_state[6].z, outer_state[6].w,
+			outer_state[7].x, outer_state[7].y, outer_state[7].z, outer_state[7].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[8].x, outer_state[8].y, outer_state[8].z, outer_state[8].w,
+			outer_state[9].x, outer_state[9].y, outer_state[9].z, outer_state[9].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[10].x, outer_state[10].y, outer_state[10].z, outer_state[10].w,
+			outer_state[11].x, outer_state[11].y, outer_state[11].z, outer_state[11].w, outer_state[12].x);
+
+		// Debug: Log the HMAC buffer after initialization - 72 bytes (18 uint32 values)
+		const uint4 *inner_buffer = (const uint4 *)hmac_pw.inner.buffer4;
+		printf("PBKDF2_84[%u]: HMAC_INIT innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[0].x, inner_buffer[0].y, inner_buffer[0].z, inner_buffer[0].w,
+			inner_buffer[1].x, inner_buffer[1].y, inner_buffer[1].z, inner_buffer[1].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[2].x, inner_buffer[2].y, inner_buffer[2].z, inner_buffer[2].w,
+			inner_buffer[3].x, inner_buffer[3].y, inner_buffer[3].z, inner_buffer[3].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT innerbuffer[8-11]: %08x%08x\n", gid, inner_buffer[4].x, inner_buffer[4].y);
+
+		const uint4 *outer_buffer = (const uint4 *)hmac_pw.outer.buffer4;
+		printf("PBKDF2_84[%u]: HMAC_INIT outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[0].x, outer_buffer[0].y, outer_buffer[0].z, outer_buffer[0].w,
+			outer_buffer[1].x, outer_buffer[1].y, outer_buffer[1].z, outer_buffer[1].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[2].x, outer_buffer[2].y, outer_buffer[2].z, outer_buffer[2].w,
+			outer_buffer[3].x, outer_buffer[3].y, outer_buffer[3].z, outer_buffer[3].w);
+		printf("PBKDF2_84[%u]: HMAC_INIT outerbuffer[8-11]: %08x%08x\n", gid, outer_buffer[4].x, outer_buffer[4].y);
+	}
 
 	/* hmac(password, salt...) */
 	scrypt_hmac_update_84(&hmac_pw, salt);
+	{
+		// Debug: Log the HMAC state (not buffer) after update - full 25 uint32 values
+		const uint4 *inner_state = (const uint4 *)hmac_pw.inner.state4;
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[0].x, inner_state[0].y, inner_state[0].z, inner_state[0].w,
+			inner_state[1].x, inner_state[1].y, inner_state[1].z, inner_state[1].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[2].x, inner_state[2].y, inner_state[2].z, inner_state[2].w,
+			inner_state[3].x, inner_state[3].y, inner_state[3].z, inner_state[3].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[4].x, inner_state[4].y, inner_state[4].z, inner_state[4].w,
+			inner_state[5].x, inner_state[5].y, inner_state[5].z, inner_state[5].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[6].x, inner_state[6].y, inner_state[6].z, inner_state[6].w,
+			inner_state[7].x, inner_state[7].y, inner_state[7].z, inner_state[7].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[8].x, inner_state[8].y, inner_state[8].z, inner_state[8].w,
+			inner_state[9].x, inner_state[9].y, inner_state[9].z, inner_state[9].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_state[10].x, inner_state[10].y, inner_state[10].z, inner_state[10].w,
+			inner_state[11].x, inner_state[11].y, inner_state[11].z, inner_state[11].w, inner_state[12].x);
 
+		const uint4 *outer_state = (const uint4 *)hmac_pw.outer.state4;
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[0].x, outer_state[0].y, outer_state[0].z, outer_state[0].w,
+			outer_state[1].x, outer_state[1].y, outer_state[1].z, outer_state[1].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[2].x, outer_state[2].y, outer_state[2].z, outer_state[2].w,
+			outer_state[3].x, outer_state[3].y, outer_state[3].z, outer_state[3].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[4].x, outer_state[4].y, outer_state[4].z, outer_state[4].w,
+			outer_state[5].x, outer_state[5].y, outer_state[5].z, outer_state[5].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[6].x, outer_state[6].y, outer_state[6].z, outer_state[6].w,
+			outer_state[7].x, outer_state[7].y, outer_state[7].z, outer_state[7].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[8].x, outer_state[8].y, outer_state[8].z, outer_state[8].w,
+			outer_state[9].x, outer_state[9].y, outer_state[9].z, outer_state[9].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_state[10].x, outer_state[10].y, outer_state[10].z, outer_state[10].w,
+			outer_state[11].x, outer_state[11].y, outer_state[11].z, outer_state[11].w, outer_state[12].x);
+
+		// Debug: Log the HMAC buffer after update - 72 bytes (18 uint32 values)
+		const uint4 *inner_buffer = (const uint4 *)hmac_pw.inner.buffer4;
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[0].x, inner_buffer[0].y, inner_buffer[0].z, inner_buffer[0].w,
+			inner_buffer[1].x, inner_buffer[1].y, inner_buffer[1].z, inner_buffer[1].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, inner_buffer[2].x, inner_buffer[2].y, inner_buffer[2].z, inner_buffer[2].w,
+			inner_buffer[3].x, inner_buffer[3].y, inner_buffer[3].z, inner_buffer[3].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE innerbuffer[8-11]: %08x%08x\n", gid, inner_buffer[4].x, inner_buffer[4].y);
+
+		const uint4 *outer_buffer = (const uint4 *)hmac_pw.outer.buffer4;
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[0].x, outer_buffer[0].y, outer_buffer[0].z, outer_buffer[0].w,
+			outer_buffer[1].x, outer_buffer[1].y, outer_buffer[1].z, outer_buffer[1].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x\n", 
+			gid, outer_buffer[2].x, outer_buffer[2].y, outer_buffer[2].z, outer_buffer[2].w,
+			outer_buffer[3].x, outer_buffer[3].y, outer_buffer[3].z, outer_buffer[3].w);
+		printf("PBKDF2_84[%u]: HMAC_UPDATE outerbuffer[8-11]: %08x%08x\n", gid, outer_buffer[4].x, outer_buffer[4].y);
+	}
 		/* U1 = hmac(password, salt || be(i)) */
 		/* U32TO8_BE(be, i); */
 		//work = hmac_pw;
@@ -669,15 +913,6 @@ scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		for (i = 0; i < 4; i++) {
 			out4[i + 4] = ti4[i];
 		}
-		
-	// Debug: Log PBKDF2_84 output for all threads
-	const uint gid = get_global_id(0);
-	printf("PBKDF2_84[%u]: out4[0-3]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
-		gid, out4[0].x, out4[0].y, out4[0].z, out4[0].w,
-		out4[1].x, out4[1].y, out4[1].z, out4[1].w);
-	printf("PBKDF2_84[%u]: out4[4-7]=%08x%08x%08x%08x %08x%08x%08x%08x\n", 
-		gid, out4[2].x, out4[2].y, out4[2].z, out4[2].w,
-		out4[3].x, out4[3].y, out4[3].z, out4[3].w);
 }
 
 __constant uint4 MASK_2 = (uint4) (1, 2, 3, 0);

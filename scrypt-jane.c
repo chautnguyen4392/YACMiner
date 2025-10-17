@@ -624,10 +624,139 @@ sj_scrypt_pbkdf2(const uint8_t *password, size_t password_len, const uint8_t *sa
 
 	/* hmac(password, ...) */
 	sj_scrypt_hmac_init(&hmac_pw, password, password_len);
+	{
+		// Debug: Log the HMAC state (not buffer) after initialization
+		const uint32_t *inner_state = (const uint32_t *)&hmac_pw.inner.state;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[0], inner_state[1], inner_state[2], inner_state[3],
+				inner_state[4], inner_state[5], inner_state[6], inner_state[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[8], inner_state[9], inner_state[10], inner_state[11],
+				inner_state[12], inner_state[13], inner_state[14], inner_state[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[16], inner_state[17], inner_state[18], inner_state[19],
+				inner_state[20], inner_state[21], inner_state[22], inner_state[23]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[24], inner_state[25], inner_state[26], inner_state[27],
+				inner_state[28], inner_state[29], inner_state[30], inner_state[31]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[32], inner_state[33], inner_state[34], inner_state[35],
+				inner_state[36], inner_state[37], inner_state[38], inner_state[39]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[40], inner_state[41], inner_state[42], inner_state[43],
+				inner_state[44], inner_state[45], inner_state[46], inner_state[47], inner_state[48]);
+
+		const uint32_t *outer_state = (const uint32_t *)&hmac_pw.outer.state;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[0], outer_state[1], outer_state[2], outer_state[3],
+				outer_state[4], outer_state[5], outer_state[6], outer_state[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[8], outer_state[9], outer_state[10], outer_state[11],
+				outer_state[12], outer_state[13], outer_state[14], outer_state[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[16], outer_state[17], outer_state[18], outer_state[19],
+				outer_state[20], outer_state[21], outer_state[22], outer_state[23]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[24], outer_state[25], outer_state[26], outer_state[27],
+				outer_state[28], outer_state[29], outer_state[30], outer_state[31]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[32], outer_state[33], outer_state[34], outer_state[35],
+				outer_state[36], outer_state[37], outer_state[38], outer_state[39]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[40], outer_state[41], outer_state[42], outer_state[43],
+				outer_state[44], outer_state[45], outer_state[46], outer_state[47], outer_state[48]);
+
+		// Debug: Log the HMAC buffer after initialization - 72 bytes (18 uint32 values)
+		const uint32_t *inner_buffer = (const uint32_t *)hmac_pw.inner.buffer;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_buffer[0], inner_buffer[1], inner_buffer[2], inner_buffer[3],
+				inner_buffer[4], inner_buffer[5], inner_buffer[6], inner_buffer[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_buffer[8], inner_buffer[9], inner_buffer[10], inner_buffer[11],
+				inner_buffer[12], inner_buffer[13], inner_buffer[14], inner_buffer[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerbuffer[8-11]: %08x%08x", inner_buffer[16], inner_buffer[17]);
+
+		const uint32_t *outer_buffer = (const uint32_t *)hmac_pw.outer.buffer;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_buffer[0], outer_buffer[1], outer_buffer[2], outer_buffer[3],
+				outer_buffer[4], outer_buffer[5], outer_buffer[6], outer_buffer[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_buffer[8], outer_buffer[9], outer_buffer[10], outer_buffer[11],
+				outer_buffer[12], outer_buffer[13], outer_buffer[14], outer_buffer[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerbuffer[8-11]: %08x%08x", outer_buffer[16], outer_buffer[17]);
+
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT innerleftover: %u", (uint32_t)hmac_pw.inner.leftover);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_INIT outerleftover: %u", (uint32_t)hmac_pw.outer.leftover);
+	}
+
 
 	/* hmac(password, salt...) */
 	hmac_pw_salt = hmac_pw;
 	sj_scrypt_hmac_update(&hmac_pw_salt, salt, salt_len);
+	{
+		// Debug: Log the HMAC state (not buffer) after update
+		const uint32_t *inner_state = (const uint32_t *)&hmac_pw_salt.inner.state;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[0], inner_state[1], inner_state[2], inner_state[3],
+				inner_state[4], inner_state[5], inner_state[6], inner_state[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[8], inner_state[9], inner_state[10], inner_state[11],
+				inner_state[12], inner_state[13], inner_state[14], inner_state[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[16], inner_state[17], inner_state[18], inner_state[19],
+				inner_state[20], inner_state[21], inner_state[22], inner_state[23]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[24], inner_state[25], inner_state[26], inner_state[27],
+				inner_state[28], inner_state[29], inner_state[30], inner_state[31]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[32], inner_state[33], inner_state[34], inner_state[35],
+				inner_state[36], inner_state[37], inner_state[38], inner_state[39]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_state[40], inner_state[41], inner_state[42], inner_state[43],
+				inner_state[44], inner_state[45], inner_state[46], inner_state[47], inner_state[48]);
+
+		const uint32_t *outer_state = (const uint32_t *)&hmac_pw_salt.outer.state;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[0], outer_state[1], outer_state[2], outer_state[3],
+				outer_state[4], outer_state[5], outer_state[6], outer_state[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[8], outer_state[9], outer_state[10], outer_state[11],
+				outer_state[12], outer_state[13], outer_state[14], outer_state[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[8-11]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[16], outer_state[17], outer_state[18], outer_state[19],
+				outer_state[20], outer_state[21], outer_state[22], outer_state[23]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[12-15]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[24], outer_state[25], outer_state[26], outer_state[27],
+				outer_state[28], outer_state[29], outer_state[30], outer_state[31]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[16-19]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[32], outer_state[33], outer_state[34], outer_state[35],
+				outer_state[36], outer_state[37], outer_state[38], outer_state[39]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerstate[20-24]: %08x%08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_state[40], outer_state[41], outer_state[42], outer_state[43],
+				outer_state[44], outer_state[45], outer_state[46], outer_state[47], outer_state[48]);
+
+		// Debug: Log the HMAC buffer after update - 72 bytes (18 uint32 values)
+		const uint32_t *inner_buffer = (const uint32_t *)hmac_pw_salt.inner.buffer;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_buffer[0], inner_buffer[1], inner_buffer[2], inner_buffer[3],
+				inner_buffer[4], inner_buffer[5], inner_buffer[6], inner_buffer[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				inner_buffer[8], inner_buffer[9], inner_buffer[10], inner_buffer[11],
+				inner_buffer[12], inner_buffer[13], inner_buffer[14], inner_buffer[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerbuffer[8-11]: %08x%08x", inner_buffer[16], inner_buffer[17]);
+
+		const uint32_t *outer_buffer = (const uint32_t *)hmac_pw_salt.outer.buffer;
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerbuffer[0-3]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_buffer[0], outer_buffer[1], outer_buffer[2], outer_buffer[3],
+				outer_buffer[4], outer_buffer[5], outer_buffer[6], outer_buffer[7]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerbuffer[4-7]: %08x%08x%08x%08x%08x%08x%08x%08x", 
+				outer_buffer[8], outer_buffer[9], outer_buffer[10], outer_buffer[11],
+				outer_buffer[12], outer_buffer[13], outer_buffer[14], outer_buffer[15]);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerbuffer[8-11]: %08x%08x", outer_buffer[16], outer_buffer[17]);
+
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE innerleftover: %u", (uint32_t)hmac_pw_salt.inner.leftover);
+		applog(LOG_DEBUG, "sj_scrypt_pbkdf2: HMAC_UPDATE outerleftover: %u", (uint32_t)hmac_pw_salt.outer.leftover);
+	}
 
 	blocks = ((uint32_t)bytes + (SJ_SCRYPT_HASH_DIGEST_SIZE - 1)) / SJ_SCRYPT_HASH_DIGEST_SIZE;
 	for (i = 1; i <= blocks; i++) {
@@ -671,6 +800,24 @@ sj_scrypt(const uint8_t *password, size_t password_len, const uint8_t *salt, siz
 	Y = YX.ptr;
 	X = Y + chunk_bytes;
         sj_scrypt_pbkdf2(password, password_len, salt, salt_len, X, chunk_bytes);
+
+	const uint32_t *input_data = (const uint32_t *)X;
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[0-3]: %08x%08x%08x%08x", 
+		input_data[0], input_data[1], input_data[2], input_data[3]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[4-7]: %08x%08x%08x%08x", 
+		input_data[4], input_data[5], input_data[6], input_data[7]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[8-11]: %08x%08x%08x%08x", 
+		input_data[8], input_data[9], input_data[10], input_data[11]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[12-15]: %08x%08x%08x%08x", 
+		input_data[12], input_data[13], input_data[14], input_data[15]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[16-19]: %08x%08x%08x%08x", 
+		input_data[16], input_data[17], input_data[18], input_data[19]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[20-23]: %08x%08x%08x%08x", 
+		input_data[20], input_data[21], input_data[22], input_data[23]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[24-27]: %08x%08x%08x%08x", 
+		input_data[24], input_data[25], input_data[26], input_data[27]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[28-31]: %08x%08x%08x%08x", 
+		input_data[28], input_data[29], input_data[30], input_data[31]);
 
 	/* 2: X = ROMix(X) */
 	sj_scrypt_ROMix((sj_scrypt_mix_word_t *)X, (sj_scrypt_mix_word_t *)Y, (sj_scrypt_mix_word_t *)V.ptr, N, 1);
