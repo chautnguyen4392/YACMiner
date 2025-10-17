@@ -1238,6 +1238,12 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	// Debug: Log ROMix output for all threads
 	printf("KERNEL80[%u]: ROMix_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
 		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+	printf("KERNEL80[%u]: ROMix_X[2]=%08x%08x%08x%08x, X[3]=%08x%08x%08x%08x\n", 
+		gid, X[2].x, X[2].y, X[2].z, X[2].w, X[3].x, X[3].y, X[3].z, X[3].w);
+	printf("KERNEL80[%u]: ROMix_X[4]=%08x%08x%08x%08x, X[5]=%08x%08x%08x%08x\n", 
+		gid, X[4].x, X[4].y, X[4].z, X[4].w, X[5].x, X[5].y, X[5].z, X[5].w);
+	printf("KERNEL80[%u]: ROMix_X[6]=%08x%08x%08x%08x, X[7]=%08x%08x%08x%08x\n", 
+		gid, X[6].x, X[6].y, X[6].z, X[6].w, X[7].x, X[7].y, X[7].z, X[7].w);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
@@ -1324,6 +1330,12 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	// Debug: Log ROMix output for all threads
 	printf("KERNEL84[%u]: ROMix_X[0]=%08x%08x%08x%08x, X[1]=%08x%08x%08x%08x\n", 
 		gid, X[0].x, X[0].y, X[0].z, X[0].w, X[1].x, X[1].y, X[1].z, X[1].w);
+	printf("KERNEL84[%u]: ROMix_X[2]=%08x%08x%08x%08x, X[3]=%08x%08x%08x%08x\n", 
+		gid, X[2].x, X[2].y, X[2].z, X[2].w, X[3].x, X[3].y, X[3].z, X[3].w);
+	printf("KERNEL84[%u]: ROMix_X[4]=%08x%08x%08x%08x, X[5]=%08x%08x%08x%08x\n", 
+		gid, X[4].x, X[4].y, X[4].z, X[4].w, X[5].x, X[5].y, X[5].z, X[5].w);
+	printf("KERNEL84[%u]: ROMix_X[6]=%08x%08x%08x%08x, X[7]=%08x%08x%08x%08x\n", 
+		gid, X[6].x, X[6].y, X[6].z, X[6].w, X[7].x, X[7].y, X[7].z, X[7].w);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
