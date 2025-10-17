@@ -558,17 +558,17 @@ static void
 scrypt_copy_hmac_state_128B(scrypt_hmac_state *dest, const scrypt_hmac_state *src) {
 	uint i;
 
-	for (i = 0; i < 12; i++) {
+	#pragma unroll
+	for (i = 0; i < 13; i++) {
 		dest->inner.state4[i] = src->inner.state4[i];
-	}
-	dest->inner.state4[12].xy = src->inner.state4[12].xy;
-
-	dest->inner.buffer4[0].xy = src->inner.buffer4[0].xy;
-
-	for (i = 0; i < 12; i++) {
 		dest->outer.state4[i] = src->outer.state4[i];
 	}
-	dest->outer.state4[12].xy = src->outer.state4[12].xy;
+
+	#pragma unroll
+	for (i = 0; i < 5; i++) {
+		dest->inner.buffer4[i] = src->inner.buffer4[i];
+		dest->outer.buffer4[i] = src->outer.buffer4[i];
+	}
 }
 
 __constant uint be1 = 0x01000000;
