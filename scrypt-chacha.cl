@@ -418,6 +418,19 @@ scrypt_hmac_init(scrypt_hmac_state *st, const uint4 *key) {
 	uint4 pad4[SCRYPT_HASH_BLOCK_SIZE/16 + 1];
 	uint i;
 
+	/* Initialize hash states - clear both state and buffer */
+	#pragma unroll
+	for (i = 0; i < 13; i++) {
+		st->inner.state4[i] = ZERO;
+		st->outer.state4[i] = ZERO;
+	}
+
+	#pragma unroll
+	for (i = 0; i < 5; i++) {
+		st->inner.buffer4[i] = ZERO;
+		st->outer.buffer4[i] = ZERO;
+	}
+
 	/* if it's > blocksize bytes, hash it */
 	scrypt_hash_80(pad4, key);
 	pad4[4].xy = ZERO_UINT2;
@@ -736,30 +749,6 @@ scrypt_pbkdf2_128B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		}
 }
 
-static void
-scrypt_pbkdf2_32B(const uint4 *password, const uint4 *salt, uint4 *out4) {
-	scrypt_hmac_state hmac_pw;
-	uint4 ti4[4];
-	
-	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
-
-	/* hmac(password, ...) */
-	scrypt_hmac_init(&hmac_pw, password);
-
-	/* hmac(password, salt...) */
-	scrypt_hmac_update_128(&hmac_pw, salt);
-
-		/* U1 = hmac(password, salt || be(i)) */
-		/* U32TO8_BE(be, i); */
-		scrypt_hmac_update_4_after_128(&hmac_pw, be1);
-		scrypt_hmac_finish_32B(&hmac_pw, ti4);
-
-		#pragma unroll
-		for (uint i = 0; i < 2; i++) {
-			out4[i] = ti4[i];
-		}
-}
-
 // New PBKDF2 functions for 84-byte input
 static void
 scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
@@ -979,6 +968,54 @@ scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		#pragma unroll
 		for (i = 0; i < 4; i++) {
 			out4[i + 4] = ti4[i];
+		}
+}
+
+static void
+scrypt_pbkdf2_32B(const uint4 *password, const uint4 *salt, uint4 *out4) {
+	scrypt_hmac_state hmac_pw;
+	uint4 ti4[4];
+
+	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
+
+	/* hmac(password, ...) */
+	scrypt_hmac_init(&hmac_pw, password);
+
+	/* hmac(password, salt...) */
+	scrypt_hmac_update_128(&hmac_pw, salt);
+
+		/* U1 = hmac(password, salt || be(i)) */
+		/* U32TO8_BE(be, i); */
+		scrypt_hmac_update_4_after_128(&hmac_pw, be1);
+		scrypt_hmac_finish_32B(&hmac_pw, ti4);
+
+		#pragma unroll
+		for (uint i = 0; i < 2; i++) {
+			out4[i] = ti4[i];
+		}
+}
+
+static void
+scrypt_pbkdf2_32B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
+	scrypt_hmac_state hmac_pw;
+	uint4 ti4[4];
+
+	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
+
+	/* hmac(password, ...) */
+	scrypt_hmac_init_84(&hmac_pw, password);
+
+	/* hmac(password, salt...) */
+	scrypt_hmac_update_128(&hmac_pw, salt);
+
+		/* U1 = hmac(password, salt || be(i)) */
+		/* U32TO8_BE(be, i); */
+		scrypt_hmac_update_4_after_128(&hmac_pw, be1);
+		scrypt_hmac_finish_32B(&hmac_pw, ti4);
+
+		#pragma unroll
+		for (uint i = 0; i < 2; i++) {
+			out4[i] = ti4[i];
 		}
 }
 
@@ -1338,7 +1375,7 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 		gid, X[6].x, X[6].y, X[6].z, X[6].w, X[7].x, X[7].y, X[7].z, X[7].w);
 
 	/* 3: Out = PBKDF2(password, X) */
-	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
+	scrypt_pbkdf2_32B_84(password, X, (uint4 *)output_hash);
 	
 	// Debug: Log final output for all threads
 	printf("KERNEL84[%u]: Final_hash[0]=%08x%08x%08x%08x, hash[1]=%08x%08x%08x%08x\n", 
