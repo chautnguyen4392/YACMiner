@@ -447,6 +447,19 @@ scrypt_hmac_init_84(scrypt_hmac_state *st, const uint4 *key) {
 	uint4 pad4[SCRYPT_HASH_BLOCK_SIZE/16 + 1];
 	uint i;
 
+	/* Initialize hash states - clear both state and buffer */
+	#pragma unroll
+	for (i = 0; i < 13; i++) {
+		st->inner.state4[i] = ZERO;
+		st->outer.state4[i] = ZERO;
+	}
+
+	#pragma unroll
+	for (i = 0; i < 5; i++) {
+		st->inner.buffer4[i] = ZERO;
+		st->outer.buffer4[i] = ZERO;
+	}
+
 	/* if it's > blocksize bytes, hash it */
 	scrypt_hash_84(pad4, key);
 	pad4[4].xy = ZERO_UINT2;
