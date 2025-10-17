@@ -802,23 +802,14 @@ sj_scrypt(const uint8_t *password, size_t password_len, const uint8_t *salt, siz
         sj_scrypt_pbkdf2(password, password_len, salt, salt_len, X, chunk_bytes);
 
 	const uint32_t *input_data = (const uint32_t *)X;
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[0-3]: %08x%08x%08x%08x", 
-		input_data[0], input_data[1], input_data[2], input_data[3]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[4-7]: %08x%08x%08x%08x", 
-		input_data[4], input_data[5], input_data[6], input_data[7]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[8-11]: %08x%08x%08x%08x", 
-		input_data[8], input_data[9], input_data[10], input_data[11]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[12-15]: %08x%08x%08x%08x", 
-		input_data[12], input_data[13], input_data[14], input_data[15]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[16-19]: %08x%08x%08x%08x", 
-		input_data[16], input_data[17], input_data[18], input_data[19]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[20-23]: %08x%08x%08x%08x", 
-		input_data[20], input_data[21], input_data[22], input_data[23]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[24-27]: %08x%08x%08x%08x", 
-		input_data[24], input_data[25], input_data[26], input_data[27]);
-	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[28-31]: %08x%08x%08x%08x", 
-		input_data[28], input_data[29], input_data[30], input_data[31]);
-
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[0-3]: %08x%08x%08x%08x, X[4-7]: %08x%08x%08x%08x", 
+		input_data[0], input_data[1], input_data[2], input_data[3], input_data[4], input_data[5], input_data[6], input_data[7]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[8-11]: %08x%08x%08x%08x, X[12-15]: %08x%08x%08x%08x", 
+		input_data[8], input_data[9], input_data[10], input_data[11], input_data[12], input_data[13], input_data[14], input_data[15]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[16-19]: %08x%08x%08x%08x, X[20-23]: %08x%08x%08x%08x", 
+		input_data[16], input_data[17], input_data[18], input_data[19], input_data[20], input_data[21], input_data[22], input_data[23]);
+	applog(LOG_DEBUG, "sj_scrypt: PBKDF2 Output X[24-27]: %08x%08x%08x%08x, X[28-31]: %08x%08x%08x%08x", 
+		input_data[24], input_data[25], input_data[26], input_data[27], input_data[28], input_data[29], input_data[30], input_data[31]);
 	/* 2: X = ROMix(X) */
 	sj_scrypt_ROMix((sj_scrypt_mix_word_t *)X, (sj_scrypt_mix_word_t *)Y, (sj_scrypt_mix_word_t *)V.ptr, N, 1);
 
