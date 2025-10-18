@@ -5999,7 +5999,7 @@ void inc_hw_errors(struct thr_info *thr)
 /* Returns true if nonce for work was a valid share */
 bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce)
 {
-	uint32_t *work_nonce = (uint32_t *)(work->data + 64 + 12);
+	uint32_t *work_nonce = (uint32_t *)(work->data + (opt_scrypt_chacha_84 ? 80 : 76));
 	struct timeval tv_work_found;
 	unsigned char hash2[32];
 	uint32_t *hash2_32 = (uint32_t *)hash2;

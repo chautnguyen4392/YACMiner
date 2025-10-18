@@ -1339,19 +1339,21 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 
 	le_target = *(cl_uint *)(blk->work->target + 28);
 
+	int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
 	if (!opt_scrypt_chacha) {
 		clState->cldata = blk->work->data;
 	} else {
-		applog(LOG_DEBUG, "Timestamp: %d, Nfactor: %d, Target: %x", timestamp, nfactor, le_target);
+		// Initialize the data array to zero
+		memset(data, 0, sizeof(data));
+		applog(LOG_DEBUG, "Timestamp: %d, Nfactor: %d, Target: %08x", timestamp, nfactor, le_target);
 		if (opt_scrypt_chacha_84) {
-			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 21);
 		} else {
-			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 19);
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
 		}
 		clState->cldata = data;
 	}
-        
-	int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
+
 	status = clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, buffer_size, clState->cldata, 0, NULL,NULL);
 
 	CL_SET_ARG(clState->CLbuffer0);
@@ -1851,9 +1853,8 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 
 	if (opt_scrypt_chacha)
 	{
-		uint32_t *o = thrdata->res;
 		uint32_t target = *(uint32_t *)(work->target + 28);
-		applog(LOG_DEBUG, "Nonce: %u, Output buffer: %x %x %x %x %x %x %x %x Target: %x", work->blk.nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], target);
+		applog(LOG_DEBUG, "Nonce: %u, Target: %08x", work->blk.nonce, target);
 	}
 	
 	/* The amount of work scanned can fluctuate when intensity changes

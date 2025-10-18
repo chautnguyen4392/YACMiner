@@ -87,20 +87,23 @@ void sc_scrypt_regenhash(struct work *work)
 		//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_starttime);
 	}
 	int nfactor;
+	int data_size;
 	if (opt_scrypt_chacha_84) {
 		// For 84-byte headers, timestamp is in data[17] and data[18]
 		// Use the lower 32 bits (data[17]) for Nfactor calculation
 		nfactor = GetNfactor(data[17], minn, maxn, starttime);
+		data_size = 84;
 	} else {
 		nfactor = GetNfactor(data[17], minn, maxn, starttime);
+		data_size = 80;
 	}
 
 	/* Print data array as hex string */
-	char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
+	char *data_hex = bin2hex((unsigned char *)data, data_size);
 
 	// The ohash is in little endian format
-	sj_scrypt((unsigned char *)data, 80,
-			(unsigned char *)data, 80,
+	sj_scrypt((unsigned char *)data, data_size,
+			(unsigned char *)data, data_size,
 			nfactor, 0, 0, (unsigned char *)ohash, 32);
     
 //	flip32(ohash, ohash); // Not needed for scrypt-chacha - mikaelh
