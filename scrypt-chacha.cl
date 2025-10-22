@@ -963,24 +963,45 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	uint4 X[8];
 	uint output_hash[8] __attribute__ ((aligned (16)));
 	const uint gid = get_global_id(0);
-	uint Nfactor = 0;
-	uint tmp = N >> 1;
+	const uint group_id = get_group_id(0);
+	const uint lid = get_local_id(0);
+	const uint Nfactor = 21;
 	
-	/* Determine the Nfactor */
-	while ((tmp & 1) == 0) {
-		tmp >>= 1;
-		Nfactor++;
+	// Local memory staging
+	__local uint4 local_scratch[WORKSIZE * 8];  // 84 bytes per work-item
+
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: STARTING...\n", gid, group_id, lid);
+	// Load data into local memory (coalesced) for 84 bytes
+    if (lid < 6) {
+        local_scratch[lid] = input[lid];  // Only some work-items do this
+		printf("search84[global_id:%u, group_id:%u, lid:%u]: LOADED local_scratch[%u]: %08x%08x%08x%08x\n", gid, group_id, lid, lid, local_scratch[lid].x, local_scratch[lid].y, local_scratch[lid].z, local_scratch[lid].w);
+    } else {
+		printf("search84[global_id:%u, group_id:%u, lid:%u]: SKIPPED LOADING local_scratch\n", gid, group_id, lid);
 	}
+	barrier(CLK_LOCAL_MEM_FENCE);  // Wait for all work-items to finish loading
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: LOADED...\n", gid, group_id, lid);
 	
 	// Copy 84 bytes (5.25 uint4) from input
-	password[0] = input[0];  // bytes 0-15
-	password[1] = input[1];  // bytes 16-31
-	password[2] = input[2];  // bytes 32-47
-	password[3] = input[3];  // bytes 48-63
-	password[4] = input[4];  // bytes 64-79
-	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[0] = local_scratch[0];  // bytes 0-15
+	password[1] = local_scratch[1];  // bytes 16-31
+	password[2] = local_scratch[2];  // bytes 32-47
+	password[3] = local_scratch[3];  // bytes 48-63
+	password[4] = local_scratch[4];  // bytes 64-79
+	password[5] = local_scratch[5];  // bytes 80-95 (only first 4 bytes used for block header)
 	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
 	
+		// Debug: Log input data for all threads
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: Input[0]=%08x%08x%08x%08x, Input[1]=%08x%08x%08x%08x\n", 
+		gid, group_id, lid, password[0].x, password[0].y, password[0].z, password[0].w,
+		password[1].x, password[1].y, password[1].z, password[1].w);
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: Input[2]=%08x%08x%08x%08x, Input[3]=%08x%08x%08x%08x\n", 
+		gid, group_id, lid, password[2].x, password[2].y, password[2].z, password[2].w,
+		password[3].x, password[3].y, password[3].z, password[3].w);
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: Input[4]=%08x%08x%08x%08x, Input[5]=%08x\n", 
+		gid, group_id, lid, password[4].x, password[4].y, password[4].z, password[4].w,
+		password[5].x);
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: Nfactor=%u, N=%u, target=%08x\n", gid, group_id, lid, Nfactor, N, target);
+
 	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
 	scrypt_pbkdf2_128B_84(password, password, X);
 
@@ -993,4 +1014,5 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	bool result = (output_hash[7] <= target);
 	if (result)
 		SETFOUND(gid);
+	printf("search84[global_id:%u, group_id:%u, lid:%u]: ENDING...\n", gid, group_id, lid);
 }
