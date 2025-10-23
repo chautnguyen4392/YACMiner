@@ -885,23 +885,6 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 			scrypt_ChunkMix_inplace_local(X);
 		}
 	}
-
-#if (LOOKUP_GAP != 1) && (LOOKUP_GAP != 2) && (LOOKUP_GAP != 4) && (LOOKUP_GAP != 8)
-	if (N % LOOKUP_GAP > 0) {
-		y = N / LOOKUP_GAP;
-		const uint base_y_final = y * stride_y;
-
-		#pragma unroll
-		for (z = 0; z < zSIZE; z++) {
-			lookup[thread_id + base_y_final + z * stride_z] = X[z];
-		}
-
-		for (j = 0; j < N % LOOKUP_GAP; j++) {
-			scrypt_ChunkMix_inplace_local(X);
-		}
-	}
-#endif
-
 	/* TACA: Scratchpad Access Phase */
 	/* Use same layout for random access */
 	/* 6: for i = 0 to N - 1 do */
