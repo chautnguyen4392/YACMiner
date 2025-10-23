@@ -718,6 +718,10 @@ build:
 	if (!clState->hasOpenCL11plus)
 		strcat(CompilerOptions, " -D OCL1");
 
+	/* Add AMD-specific optimizations for better performance */
+	strcat(CompilerOptions, " -cl-fast-relaxed-math -cl-mad-enable");
+	applog(LOG_DEBUG, "Adding compiler optimizations for better performance");
+	
 	applog(LOG_DEBUG, "CompilerOptions: %s", CompilerOptions);
 	status = clBuildProgram(clState->program, 1, &devices[gpu], CompilerOptions , NULL, NULL);
 	free(CompilerOptions);

@@ -824,12 +824,17 @@ scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 #define Coord(x,y,z) x+y*(x ## SIZE)+z*(y ## SIZE)*(x ## SIZE)
 #define CO Coord(z,x,y)
 
+/* Optimized memory layout for coalesced writes during population phase */
+/* During population: consecutive threads write consecutive addresses */
+/* During random access: use same layout for consistency */
+
 static void
 scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
 	const uint xSIZE = CONCURRENT_THREADS;
 	const uint x = gid % xSIZE;
+	const uint thread_id = x;
 	uint i, j, y, z;
 	uint4 W[8];
 
@@ -837,16 +842,23 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 	/* implicit */
 
 	/* TACA: Scratchpad Population Phase */
-	/* TACA: Normal scrypt: Store every iteration */
-	/* TACA: With LOOKUP_GAP: Store every LOOKUP_GAP iterations */
-	/* 2: for i = 0 to N - 1 do */
+	/* OPTIMIZED: Use coalesced write pattern + vector operations */
+	/* Layout: consecutive threads write to consecutive memory addresses */
+	
+	/* Pre-calculate stride for better compiler optimization */
+	const uint stride_y = CONCURRENT_THREADS;
+	const uint stride_z = CONCURRENT_THREADS * ySIZE;
+	
 	for (y = 0; y < N / LOOKUP_GAP; y++) {
 		/* 3: V_i = X */
-		/* TACA: Store X in scratchpad */
+		/* Store with coalesced access - linear layout */
+		/* Address formula: thread_id + y * stride_y + z * stride_z */
+		const uint base_y = y * stride_y;
+		
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
-			/* TACA: Store at position (z,x,y) */
-			lookup[CO] = X[z];
+			/* Vectorized store: consecutive threads write consecutive addresses */
+			lookup[thread_id + base_y + z * stride_z] = X[z];
 		}
 
 		/* TACA: Mix X LOOKUP_GAP times before next store */
@@ -859,10 +871,11 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 #if (LOOKUP_GAP != 1) && (LOOKUP_GAP != 2) && (LOOKUP_GAP != 4) && (LOOKUP_GAP != 8)
 	if (N % LOOKUP_GAP > 0) {
 		y = N / LOOKUP_GAP;
+		const uint base_y_final = y * stride_y;
 
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
-			lookup[CO] = X[z];
+			lookup[thread_id + base_y_final + z * stride_z] = X[z];
 		}
 
 		for (j = 0; j < N % LOOKUP_GAP; j++) {
@@ -872,6 +885,7 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 #endif
 
 	/* TACA: Scratchpad Access Phase */
+	/* Use same layout for random access */
 	/* 6: for i = 0 to N - 1 do */
 	for (i = 0; i < N; i++) {
 		/* TACA: Random index which stored value to read*/
@@ -879,10 +893,13 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 		j = X[4].x & (N - 1);
 		y = j / LOOKUP_GAP;
 
-		/* TACA: Load from scratchpad */
+		/* TACA: Load from scratchpad - using same layout as write */
+		const uint base_y_load = y * stride_y;
+		
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
-			W[z] = lookup[CO];
+			/* Read from same layout where we wrote during population */
+			W[z] = lookup[thread_id + base_y_load + z * stride_z];
 		}
 
 		/* TACA: Reconstruct missing iterations */
