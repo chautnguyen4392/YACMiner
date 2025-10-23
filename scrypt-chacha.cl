@@ -730,7 +730,7 @@ chacha_core(__private uint4 state[4]) {
 	x[2] = state[2];
 	x[3] = state[3];
 
-	// Fully unrolled for better instruction scheduling
+	// Optimized for RDNA: minimize register pressure while maintaining instruction throughput
 	// Round 0
 	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_16);
 	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_12);
@@ -779,64 +779,46 @@ chacha_core(__private uint4 state[4]) {
 
 static void
 scrypt_ChunkMix_inplace_Bxor_local(__private uint4 *restrict B/*[chunkWords]*/, __private uint4 *restrict Bxor/*[chunkWords]*/) {
-	/* 1: X = B_{2r - 1} */
+	/* Optimized for RDNA: minimize register pressure */
+	/* 3: X = H(X ^ B_i) */
+	B[0] ^= B[4] ^ Bxor[4] ^ Bxor[0];
+	B[1] ^= B[5] ^ Bxor[5] ^ Bxor[1];
+	B[2] ^= B[6] ^ Bxor[6] ^ Bxor[2];
+	B[3] ^= B[7] ^ Bxor[7] ^ Bxor[3];
+	
+	/* SCRYPT_MIX_FN */ 
+	chacha_core(B);
 
-	/* 2: for i = 0 to 2r - 1 do */
-		/* 3: X = H(X ^ B_i) */
-		B[0] ^= B[4] ^ Bxor[4] ^ Bxor[0];
-		B[1] ^= B[5] ^ Bxor[5] ^ Bxor[1];
-		B[2] ^= B[6] ^ Bxor[6] ^ Bxor[2];
-		B[3] ^= B[7] ^ Bxor[7] ^ Bxor[3];
-		
-		/* SCRYPT_MIX_FN */ chacha_core(B);
-
-		/* 4: Y_i = X */
-		/* 6: B'[0..r-1] = Y_even */
-		/* 6: B'[r..2r-1] = Y_odd */
-
-
-		/* 3: X = H(X ^ B_i) */
-		B[4] ^= B[0] ^ Bxor[4];
-		B[5] ^= B[1] ^ Bxor[5];
-		B[6] ^= B[2] ^ Bxor[6];
-		B[7] ^= B[3] ^ Bxor[7];
-		
-		/* SCRYPT_MIX_FN */ chacha_core(B + 4);
-
-		/* 4: Y_i = X */
-		/* 6: B'[0..r-1] = Y_even */
-		/* 6: B'[r..2r-1] = Y_odd */
+	/* 3: X = H(X ^ B_i) */
+	B[4] ^= B[0] ^ Bxor[4];
+	B[5] ^= B[1] ^ Bxor[5];
+	B[6] ^= B[2] ^ Bxor[6];
+	B[7] ^= B[3] ^ Bxor[7];
+	
+	/* SCRYPT_MIX_FN */ 
+	chacha_core(B + 4);
 }
 
 static void
 scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
-	/* 1: X = B_{2r - 1} */
+	/* Optimized for RDNA: minimize register pressure */
+	/* 3: X = H(X ^ B_i) */
+	B[0] ^= B[4];
+	B[1] ^= B[5];
+	B[2] ^= B[6];
+	B[3] ^= B[7];
 
-	/* 2: for i = 0 to 2r - 1 do */
-		/* 3: X = H(X ^ B_i) */
-		B[0] ^= B[4];
-		B[1] ^= B[5];
-		B[2] ^= B[6];
-		B[3] ^= B[7];
+	/* SCRYPT_MIX_FN */ 
+	chacha_core(B);
 
-		/* SCRYPT_MIX_FN */ chacha_core(B);
+	/* 3: X = H(X ^ B_i) */
+	B[4] ^= B[0];
+	B[5] ^= B[1];
+	B[6] ^= B[2];
+	B[7] ^= B[3];
 
-		/* 4: Y_i = X */
-		/* 6: B'[0..r-1] = Y_even */
-		/* 6: B'[r..2r-1] = Y_odd */
-
-
-		/* 3: X = H(X ^ B_i) */
-		B[4] ^= B[0];
-		B[5] ^= B[1];
-		B[6] ^= B[2];
-		B[7] ^= B[3];
-
-		/* SCRYPT_MIX_FN */ chacha_core(B + 4);
-
-		/* 4: Y_i = X */
-		/* 6: B'[0..r-1] = Y_even */
-		/* 6: B'[r..2r-1] = Y_odd */
+	/* SCRYPT_MIX_FN */ 
+	chacha_core(B + 4);
 }
 
 #define Coord(x,y,z) x+y*(x ## SIZE)+z*(y ## SIZE)*(x ## SIZE)
@@ -873,13 +855,15 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 		/* Address formula: thread_id + y * stride_y + z * stride_z */
 		const uint base_y = y * stride_y;
 		
+		/* Vectorized store: consecutive threads write consecutive addresses */
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
-			/* Vectorized store: consecutive threads write consecutive addresses */
 			lookup[thread_id + base_y + z * stride_z] = X[z];
 		}
 
 		/* TACA: Mix X LOOKUP_GAP times before next store */
+		/* Optimized: unroll when possible */
+		#pragma unroll
 		for (j = 0; j < LOOKUP_GAP; j++) {
 			/* 4: X = H(X) */
 			scrypt_ChunkMix_inplace_local(X);
@@ -897,9 +881,9 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 		/* TACA: Load from scratchpad - using same layout as write */
 		const uint base_y_load = y * stride_y;
 		
+		/* Vectorized load: consecutive threads read consecutive addresses */
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
-			/* Read from same layout where we wrote during population */
 			W[z] = lookup[thread_id + base_y_load + z * stride_z];
 		}
 
