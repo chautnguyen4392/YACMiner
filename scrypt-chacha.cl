@@ -9,6 +9,7 @@
 
 	Public Domain or MIT License, whichever is easier
 */
+#define N 4194304
 
 #define SCRYPT_HASH "Keccak-512"
 #define SCRYPT_HASH_DIGEST_SIZE 64
@@ -824,7 +825,7 @@ scrypt_ChunkMix_inplace_local(uint4 *restrict B/*[chunkWords]*/) {
 #define CO Coord(z,x,y)
 
 static void
-scrypt_ROMix(uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint N, const uint gid, const uint Nfactor) {
+scrypt_ROMix(uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
 	const uint effective_concurrency = CONCURRENT_THREADS;
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
@@ -917,20 +918,12 @@ __constant uint ES[2] = { 0x00FF00FF, 0xFF00FF00 };
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search(__global const uint4 * restrict input,
 volatile __global uint * restrict output, __global uchar * restrict padcache,
-const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
+const uint target)
 {
 	uint4 password[5];
 	uint4 X[8];
 	uint output_hash[8] __attribute__ ((aligned (16)));
 	const uint gid = get_global_id(0);
-	uint Nfactor = 0;
-	uint tmp = N >> 1;
-	
-	/* Determine the Nfactor */
-	while ((tmp & 1) == 0) {
-		tmp >>= 1;
-		Nfactor++;
-	}
 	
 	password[0] = input[0];
 	password[1] = input[1];
@@ -943,7 +936,7 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	scrypt_pbkdf2_128B(password, password, X);
 
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
+	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
@@ -957,20 +950,12 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84(__global const uint4 * restrict input,
 volatile __global uint * restrict output, __global uchar * restrict padcache,
-const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
+const uint target)
 {
 	uint4 password[6];  // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
 	uint4 X[8];
 	uint output_hash[8] __attribute__ ((aligned (16)));
 	const uint gid = get_global_id(0);
-	uint Nfactor = 0;
-	uint tmp = N >> 1;
-	
-	/* Determine the Nfactor */
-	while ((tmp & 1) == 0) {
-		tmp >>= 1;
-		Nfactor++;
-	}
 	
 	// Copy 84 bytes (5.25 uint4) from input
 	password[0] = input[0];  // bytes 0-15
@@ -985,7 +970,7 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	scrypt_pbkdf2_128B_84(password, password, X);
 
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
+	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B_84(password, X, (uint4 *)output_hash);

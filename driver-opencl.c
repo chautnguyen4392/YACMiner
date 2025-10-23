@@ -1288,7 +1288,6 @@ be32enc_vect(uint32_t *dst, const uint32_t *src, uint32_t len)
 
 static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_unused cl_uint threads)
 {
-	unsigned char *midstate = blk->work->midstate;
 	cl_kernel *kernel = &clState->kernel;
 	unsigned int num = 0;
 	cl_uint le_target;
@@ -1359,13 +1358,7 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 	CL_SET_ARG(clState->CLbuffer0);
 	CL_SET_ARG(clState->outputBuffer);
 	CL_SET_ARG(clState->padbuffer8);
-	CL_SET_VARG(4, &midstate[0]);
-	CL_SET_VARG(4, &midstate[16]);
 	CL_SET_ARG(le_target);
-
-	// If using the Scrypt-Chacha kernel, pass in N
-	if (clState->chosen_kernel == KL_SCRYPT_CHACHA)
-		CL_SET_ARG(N);
 
 	// If using the N Scrypt kernel, pass in NFactor
 	if (clState->chosen_kernel == KL_N_SCRYPT)
