@@ -724,34 +724,52 @@ __constant uint4 ROTATE_7 = (uint4) (7, 7, 7, 7);
 static void
 chacha_core(__private uint4 state[4]) {
 	uint4 x[4];
-	uint4 t;
-	uint rounds;
 
 	x[0] = state[0];
 	x[1] = state[1];
 	x[2] = state[2];
 	x[3] = state[3];
 
-	#pragma unroll
-	for (rounds = 0; rounds < 4; rounds ++) {
-		x[0] += x[1]; t = x[3] ^ x[0]; x[3] = ROTL32(t, ROTATE_16);
-		x[2] += x[3]; t = x[1] ^ x[2]; x[1] = ROTL32(t, ROTATE_12);
-		x[0] += x[1]; t = x[3] ^ x[0]; x[3] = ROTL32(t, ROTATE_8);
-		x[2] += x[3]; t = x[1] ^ x[2]; x[1] = ROTL32(t, ROTATE_7);
-		
-		// x[1] = shuffle(x[1], MASK_2);
-		// x[2] = shuffle(x[2], MASK_3);
-		// x[3] = shuffle(x[3], MASK_4);
-		
-		x[0]      += x[1].yzwx; t = x[3].wxyz ^ x[0];      x[3].wxyz = ROTL32(t, ROTATE_16);
-		x[2].zwxy += x[3].wxyz; t = x[1].yzwx ^ x[2].zwxy; x[1].yzwx = ROTL32(t, ROTATE_12);
-		x[0]      += x[1].yzwx; t = x[3].wxyz ^ x[0];      x[3].wxyz = ROTL32(t, ROTATE_8);
-		x[2].zwxy += x[3].wxyz; t = x[1].yzwx ^ x[2].zwxy; x[1].yzwx = ROTL32(t, ROTATE_7);
-		
-		// x[1] = shuffle(x[1], MASK_4);
-		// x[2] = shuffle(x[2], MASK_3);
-		// x[3] = shuffle(x[3], MASK_2);
-	}
+	// Fully unrolled for better instruction scheduling
+	// Round 0
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_16);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_12);
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_8);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_7);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_16);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_12);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_8);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_7);
+	
+	// Round 1
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_16);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_12);
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_8);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_7);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_16);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_12);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_8);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_7);
+	
+	// Round 2
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_16);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_12);
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_8);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_7);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_16);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_12);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_8);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_7);
+	
+	// Round 3
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_16);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_12);
+	x[0] += x[1]; x[3] = ROTL32(x[3] ^ x[0], ROTATE_8);
+	x[2] += x[3]; x[1] = ROTL32(x[1] ^ x[2], ROTATE_7);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_16);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_12);
+	x[0] += x[1].yzwx; x[3].wxyz = ROTL32(x[3].wxyz ^ x[0], ROTATE_8);
+	x[2].zwxy += x[3].wxyz; x[1].yzwx = ROTL32(x[1].yzwx ^ x[2].zwxy, ROTATE_7);
 
 	state[0] += x[0];
 	state[1] += x[1];
