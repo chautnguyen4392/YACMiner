@@ -722,7 +722,7 @@ __constant uint4 ROTATE_8 = (uint4) (8, 8, 8, 8);
 __constant uint4 ROTATE_7 = (uint4) (7, 7, 7, 7);
 
 static void
-chacha_core(uint4 state[4]) {
+chacha_core(__private uint4 state[4]) {
 	uint4 x[4];
 	uint4 t;
 	uint rounds;
@@ -760,7 +760,7 @@ chacha_core(uint4 state[4]) {
 }
 
 static void
-scrypt_ChunkMix_inplace_Bxor_local(uint4 *restrict B/*[chunkWords]*/, uint4 *restrict Bxor/*[chunkWords]*/) {
+scrypt_ChunkMix_inplace_Bxor_local(__private uint4 *restrict B/*[chunkWords]*/, __private uint4 *restrict Bxor/*[chunkWords]*/) {
 	/* 1: X = B_{2r - 1} */
 
 	/* 2: for i = 0 to 2r - 1 do */
@@ -791,7 +791,7 @@ scrypt_ChunkMix_inplace_Bxor_local(uint4 *restrict B/*[chunkWords]*/, uint4 *res
 }
 
 static void
-scrypt_ChunkMix_inplace_local(uint4 *restrict B/*[chunkWords]*/) {
+scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 	/* 1: X = B_{2r - 1} */
 
 	/* 2: for i = 0 to 2r - 1 do */
@@ -825,7 +825,7 @@ scrypt_ChunkMix_inplace_local(uint4 *restrict B/*[chunkWords]*/) {
 #define CO Coord(z,x,y)
 
 static void
-scrypt_ROMix(uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
+scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
 	const uint effective_concurrency = CONCURRENT_THREADS;
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
