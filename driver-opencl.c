@@ -1793,6 +1793,23 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	int found = opt_scrypt ? SCRYPT_FOUND : FOUND;
 	int buffersize = opt_scrypt ? SCRYPT_BUFFERSIZE : BUFFERSIZE;
 
+	// OpenCL profiling variables
+	cl_event kernel_event = NULL;
+	cl_event read_event = NULL;
+	cl_event write_event = NULL;
+	cl_ulong kernel_start_time = 0, kernel_end_time = 0;
+	cl_ulong read_start_time = 0, read_end_time = 0;
+	cl_ulong write_start_time = 0, write_end_time = 0;
+	cl_ulong kernel_execution_time = 0;
+	cl_ulong total_execution_time = 0;
+	static int profiling_counter = 0;
+	static double avg_kernel_time = 0.0;
+	static double avg_total_time = 0.0;
+	
+	// Fallback timing mechanism
+	struct timeval start_time, end_time;
+	gettimeofday(&start_time, NULL);
+
 	/* Windows' timer resolution is only 15ms so oversample 5x */
 	if (gpu->dynamic && (++gpu->intervals * dynamic_us) > 70000) {
 		struct timeval tv_gpuend;
@@ -1821,6 +1838,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		return -1;
 	}
 
+	// Enqueue kernel with profiling enabled
 	if (clState->goffset) {
 		size_t global_work_offset[1];
 
@@ -1828,19 +1846,23 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		if (opt_scrypt_chacha)
 		applog(LOG_DEBUG, "Nonce: %u, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
 		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, global_work_offset,
-						globalThreads, localThreads, 0,  NULL, NULL);
+						globalThreads, localThreads, 0, NULL, &kernel_event);
 	} else
 		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, NULL,
-						globalThreads, localThreads, 0,  NULL, NULL);
+						globalThreads, localThreads, 0, NULL, &kernel_event);
 	if (unlikely(status != CL_SUCCESS)) {
 		applog(LOG_ERR, "Error %d: Enqueueing kernel onto command queue. (clEnqueueNDRangeKernel)", status);
+		if (kernel_event) clReleaseEvent(kernel_event);
 		return -1;
 	}
 
+	// Enqueue read buffer with profiling
 	status = clEnqueueReadBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
-				     buffersize, thrdata->res, 0, NULL, NULL);
+				     buffersize, thrdata->res, 0, NULL, &read_event);
 	if (unlikely(status != CL_SUCCESS)) {
 		applog(LOG_ERR, "Error: clEnqueueReadBuffer failed error %d. (clEnqueueReadBuffer)", status);
+		if (kernel_event) clReleaseEvent(kernel_event);
+		if (read_event) clReleaseEvent(read_event);
 		return -1;
 	}
 
@@ -1868,13 +1890,98 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	/* This finish flushes the readbuffer set with CL_FALSE in clEnqueueReadBuffer */
 	clFinish(clState->commandQueue);
 
+	// Get end time for fallback timing
+	gettimeofday(&end_time, NULL);
+	
+	// Get profiling information
+	if (kernel_event) {
+		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, 
+						sizeof(cl_ulong), &kernel_start_time, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, 
+							sizeof(cl_ulong), &kernel_end_time, NULL);
+			if (status == CL_SUCCESS) {
+				kernel_execution_time = kernel_end_time - kernel_start_time;
+			}
+		}
+	}
+
+	if (read_event) {
+		status = clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_START, 
+						sizeof(cl_ulong), &read_start_time, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_END, 
+							sizeof(cl_ulong), &read_end_time, NULL);
+			if (status == CL_SUCCESS) {
+				total_execution_time = read_end_time - kernel_start_time;
+			}
+		}
+	}
+	
+	// Use fallback timing if OpenCL profiling failed
+	if (kernel_execution_time == 0) {
+		long fallback_time_us = (end_time.tv_sec - start_time.tv_sec) * 1000000 + 
+					(end_time.tv_usec - start_time.tv_usec);
+		kernel_execution_time = fallback_time_us * 1000; // Convert to nanoseconds
+		total_execution_time = kernel_execution_time;
+	}
+
+	// Calculate averages and log profiling info every iteration
+	profiling_counter++;
+	if (profiling_counter == 1) {
+		avg_kernel_time = kernel_execution_time;
+		avg_total_time = total_execution_time;
+	} else {
+		avg_kernel_time = (avg_kernel_time * (profiling_counter - 1) + kernel_execution_time) / profiling_counter;
+		avg_total_time = (avg_total_time * (profiling_counter - 1) + total_execution_time) / profiling_counter;
+	}
+
+	// Log profiling info every iteration
+	double kernel_time_ms = kernel_execution_time / 1000000.0; // Convert ns to ms
+	double total_time_ms = total_execution_time / 1000000.0;
+	double avg_kernel_ms = avg_kernel_time / 1000000.0;
+	double avg_total_ms = avg_total_time / 1000000.0;
+	
+	// Calculate memory bandwidth and occupancy estimates
+	size_t memory_transferred = buffersize + (opt_scrypt_chacha_84 ? 84 : 80);
+	double bandwidth_gbps = 0.0;
+	if (total_time_ms > 0.001) { // Avoid division by very small numbers
+		bandwidth_gbps = (memory_transferred / (total_time_ms / 1000.0)) / (1024.0 * 1024.0 * 1024.0);
+	}
+	
+	// Estimate occupancy based on work group size and execution time
+	double estimated_occupancy = (localThreads[0] * 100.0) / 64.0; // Assuming 64 work items per CU
+	if (estimated_occupancy > 100.0) estimated_occupancy = 100.0;
+	
+	// Determine timing method used
+	const char* timing_method = (kernel_start_time == 0) ? " [Fallback]" : " [OpenCL]";
+	
+	applog(LOG_INFO, "GPU %d Profiling [%d]: Kernel: %.2fms (avg: %.2fms), Total: %.2fms (avg: %.2fms), "
+	       "Work Items: %lu, Memory: %.2fGB/s, Est. Occupancy: %.1f%%, Private Mem: ~2.4KB/workitem%s",
+	       gpu->device_id, profiling_counter, kernel_time_ms, avg_kernel_ms, total_time_ms, avg_total_ms,
+	       (unsigned long)globalThreads[0], bandwidth_gbps, estimated_occupancy, timing_method);
+	
+	// Check for potential memory spilling indicators
+	if (kernel_time_ms > avg_kernel_ms * 1.5) {
+		applog(LOG_WARNING, "GPU %d: Kernel execution time spike detected (%.2fms vs avg %.2fms) - possible memory spilling",
+		       gpu->device_id, kernel_time_ms, avg_kernel_ms);
+	}
+	
+	if (estimated_occupancy < 25.0) {
+		applog(LOG_WARNING, "GPU %d: Low estimated occupancy (%.1f%%) - consider reducing private memory usage",
+		       gpu->device_id, estimated_occupancy);
+	}
+
 	/* FOUND entry is used as a counter to say how many nonces exist */
 	if (thrdata->res[found]) {
 		/* Clear the buffer again */
 		status = clEnqueueWriteBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
-					      buffersize, blank_res, 0, NULL, NULL);
+					      buffersize, blank_res, 0, NULL, &write_event);
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error: clEnqueueWriteBuffer failed.");
+			if (kernel_event) clReleaseEvent(kernel_event);
+			if (read_event) clReleaseEvent(read_event);
+			if (write_event) clReleaseEvent(write_event);
 			return -1;
 		}
 		applog(LOG_DEBUG, "GPU %d found something?", gpu->device_id);
@@ -1883,6 +1990,11 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		/* This finish flushes the writebuffer set with CL_FALSE in clEnqueueWriteBuffer */
 		clFinish(clState->commandQueue);
 	}
+
+	// Clean up events
+	if (kernel_event) clReleaseEvent(kernel_event);
+	if (read_event) clReleaseEvent(read_event);
+	if (write_event) clReleaseEvent(write_event);
 
 	return hashes;
 }
