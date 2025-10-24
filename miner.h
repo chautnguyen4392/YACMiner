@@ -1000,6 +1000,7 @@ extern int gpu_threads;
 extern bool opt_scrypt;
 extern bool opt_scrypt_chacha;
 extern bool opt_scrypt_chacha_84;
+extern bool opt_scrypt_split_kernels;
 extern int opt_fixed_nfactor;
 extern bool opt_n_scrypt;
 #else

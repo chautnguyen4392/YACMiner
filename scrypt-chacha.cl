@@ -978,3 +978,143 @@ const uint target)
 	if (result)
 		SETFOUND(gid);
 }
+
+/* ========================================================================
+ * SPLIT KERNEL VERSION - Eliminates register spills
+ * ========================================================================
+ * 
+ * Three separate kernels that pass data via global memory:
+ * - Part 1: Initial PBKDF2 (password → X)
+ * - Part 2: ROMix (X → X')
+ * - Part 3: Final PBKDF2 + check (password + X' → result)
+ * 
+ * Benefits:
+ * - Each kernel has independent register allocation
+ * - Variables only alive during their kernel
+ * - Much lower peak register usage per kernel
+ * - Should eliminate all register spills
+ * 
+ * Expected register usage:
+ * - Part 1: ~80-90 VGPRs, ~60-70 SGPRs
+ * - Part 2: ~90-100 VGPRs, ~50-60 SGPRs  
+ * - Part 3: ~100-115 VGPRs, ~70-80 SGPRs
+ * 
+ * Cost: 3× kernel launches + 512 bytes global memory traffic per hash
+ * Benefit: Eliminates 35-46 register spills (huge performance gain!)
+ * 
+ * Usage from host code:
+ *   // Create temp buffer
+ *   temp_X = clCreateBuffer(context, CL_MEM_READ_WRITE, 
+ *                           num_threads * 8 * sizeof(cl_uint4), ...);
+ *   
+ *   // Launch sequence
+ *   clEnqueueNDRangeKernel(queue, search84_part1, ...);
+ *   clEnqueueNDRangeKernel(queue, search84_part2, ...);
+ *   clEnqueueNDRangeKernel(queue, search84_part3, ...);
+ * ======================================================================== */
+
+// Part 1: Initial PBKDF2
+// Computes: password → X, stores X to global memory
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void search84_part1(
+	__global const uint4 * restrict input,
+	__global uint4 * restrict temp_X)  // Temporary storage for X
+{
+	uint4 password[6]; // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
+	uint4 X[8];
+	const uint gid = get_global_id(0);
+	
+	// Load password (84 bytes)
+	password[0] = input[0];  // bytes 0-15
+	password[1] = input[1];  // bytes 16-31
+	password[2] = input[2];  // bytes 32-47
+	password[3] = input[3];  // bytes 48-63
+	password[4] = input[4];  // bytes 64-79
+	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
+	
+	// Initial PBKDF2
+	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
+	scrypt_pbkdf2_128B_84(password, password, X);
+	
+	// Store X to global memory for next kernel
+	const uint offset = gid * 8;
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		temp_X[offset + i] = X[i];
+	}
+	
+	// Kernel ends: password[6] and X[8] freed
+}
+
+// Part 2: ROMix
+// Computes: X → X', loads X from global, stores result back
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void search84_part2(
+	__global uint4 * restrict temp_X,      // X from part1, will be updated
+	__global uchar * restrict padcache)
+{
+	uint4 X[8];
+	const uint gid = get_global_id(0);
+	const uint offset = gid * 8;
+	
+	// Load X from global memory
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		X[i] = temp_X[offset + i];
+	}
+	
+	// ROMix (the heavy computation)
+	/* 2: X = ROMix(X) */
+	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
+	
+	// Store updated X back to global memory
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		temp_X[offset + i] = X[i];
+	}
+	
+	// Kernel ends: X[8] and W[8] freed
+}
+
+// Part 3: Final PBKDF2 and result check
+// Computes: password + X → output_hash, checks if valid
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void search84_part3(
+	__global const uint4 * restrict input,
+	__global const uint4 * restrict temp_X,  // X from part2
+	volatile __global uint * restrict output,
+	const uint target)
+{
+	uint4 password[6]; // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
+	uint4 X[8];
+	uint output_hash[8] __attribute__ ((aligned (16)));
+	const uint gid = get_global_id(0);
+	const uint offset = gid * 8;
+	
+	// Load password (84 bytes)
+	// Copy 84 bytes (5.25 uint4) from input
+	password[0] = input[0];  // bytes 0-15
+	password[1] = input[1];  // bytes 16-31
+	password[2] = input[2];  // bytes 32-47
+	password[3] = input[3];  // bytes 48-63
+	password[4] = input[4];  // bytes 64-79
+	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
+	
+	// Load X from global memory
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		X[i] = temp_X[offset + i];
+	}
+	
+	// Final PBKDF2
+	scrypt_pbkdf2_32B_84(password, X, (uint4 *)output_hash);
+	
+	// Check result
+	bool result = (output_hash[7] <= target);
+	if (result)
+		SETFOUND(gid);
+	
+	// Kernel ends: password[6], X[8], output_hash[8] freed
+}

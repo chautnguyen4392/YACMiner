@@ -1797,6 +1797,9 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	cl_event kernel_event = NULL;
 	cl_event read_event = NULL;
 	cl_event write_event = NULL;
+	// For split kernels: track intermediate events for proper cleanup
+	cl_event split_event_part1 = NULL;
+	cl_event split_event_part2 = NULL;
 	cl_ulong kernel_start_time = 0, kernel_end_time = 0;
 	cl_ulong read_start_time = 0, read_end_time = 0;
 	cl_ulong write_start_time = 0, write_end_time = 0;
@@ -1832,33 +1835,201 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	if (hashes > gpu->max_hashes)
 		gpu->max_hashes = hashes;
 
-	status = thrdata->queue_kernel_parameters(clState, &work->blk, globalThreads[0]);
-	if (unlikely(status != CL_SUCCESS)) {
-		applog(LOG_ERR, "Error: clSetKernelArg of all params failed.");
-		return -1;
+	// Check if we should use split kernels
+	bool use_split = false;
+#ifdef USE_SCRYPT
+	use_split = (clState->use_split_kernels && opt_scrypt_chacha_84);
+#endif
+	
+	if (use_split) {
+		// ===== SPLIT KERNEL EXECUTION =====
+		cl_event event_part1 = NULL, event_part2 = NULL, event_part3 = NULL;
+		// Store references for cleanup later
+		split_event_part1 = NULL;
+		split_event_part2 = NULL;
+		unsigned int num = 0;
+		cl_uint le_target = *(cl_uint *)(work->target + 28);
+		
+		// Prepare input data (same as queue_scrypt_kernel does)
+		uint32_t data[21];
+		int minn = sc_minn;
+		int maxn = sc_maxn;
+		long starttime = sc_starttime;
+		unsigned int timestamp;
+		
+		if (opt_scrypt_chacha_84) {
+			// For 84-byte headers, timestamp is 8 bytes starting at offset 68
+			// Use the lower 32 bits for timestamp
+			timestamp = bswap_32(*((unsigned int *)(work->blk.work->data + 17*4)));
+		} else {
+			timestamp = bswap_32(*((unsigned int *)(work->blk.work->data + 17*4)));
+		}
+		
+		if (opt_scrypt_chacha || opt_n_scrypt) {
+			// Set the nfactor from pool settings
+			if (work->blk.work->pool->sc_minn) {
+				minn = *work->blk.work->pool->sc_minn;
+			}
+			if (work->blk.work->pool->sc_maxn) {
+				maxn = *work->blk.work->pool->sc_maxn;
+			}
+			if (work->blk.work->pool->sc_starttime) {
+				starttime = *work->blk.work->pool->sc_starttime;
+			}
+			work->blk.work->pool->sc_lastnfactor = GetNfactor(timestamp, minn, maxn, starttime);
+			sc_currentn = work->blk.work->pool->sc_lastnfactor;
+		}
+		
+		int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
+		if (!opt_scrypt_chacha) {
+			clState->cldata = work->blk.work->data;
+		} else {
+			// Initialize the data array to zero
+			memset(data, 0, sizeof(data));
+			applog(LOG_DEBUG, "Split kernel: Timestamp: %d, Nfactor: %d, Target: %08x", timestamp, sc_currentn, le_target);
+			if (opt_scrypt_chacha_84) {
+				sj_be32enc_vect(data, (const uint32_t *)work->blk.work->data, 21);
+			} else {
+				sj_be32enc_vect(data, (const uint32_t *)work->blk.work->data, 20);
+			}
+			clState->cldata = data;
+		}
+		
+		// Write input data to CLbuffer0 (CRITICAL: without this, kernels read garbage!)
+		status = clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, buffer_size, clState->cldata, 0, NULL, NULL);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clEnqueueWriteBuffer failed for split kernels.", status);
+			return -1;
+		}
+		
+		// Set arguments for Part 1: (input, temp_X)
+		num = 0;
+		status = clSetKernelArg(clState->kernel_part1, num++, sizeof(cl_mem), &clState->CLbuffer0);
+		status |= clSetKernelArg(clState->kernel_part1, num++, sizeof(cl_mem), &clState->temp_X_buffer);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clSetKernelArg Part 1 failed.", status);
+			return -1;
+		}
+		
+		// Launch Part 1
+		if (clState->goffset) {
+			size_t global_work_offset[1] = { work->blk.nonce };
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part1, 1, 
+			                                global_work_offset, globalThreads, localThreads, 
+			                                0, NULL, &event_part1);
+		} else {
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part1, 1, NULL,
+			                                globalThreads, localThreads, 0, NULL, &event_part1);
+		}
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: Enqueueing kernel Part 1 failed.", status);
+			if (event_part1) clReleaseEvent(event_part1);
+			return -1;
+		}
+		
+		// Set arguments for Part 2: (temp_X, padcache)
+		num = 0;
+		status = clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X_buffer);
+		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clSetKernelArg Part 2 failed.", status);
+			clReleaseEvent(event_part1);
+			return -1;
+		}
+		
+		// Launch Part 2 (wait for Part 1)
+		if (clState->goffset) {
+			size_t global_work_offset[1] = { work->blk.nonce };
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part2, 1, 
+			                                global_work_offset, globalThreads, localThreads,
+			                                1, &event_part1, &event_part2);
+		} else {
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part2, 1, NULL,
+			                                globalThreads, localThreads, 1, &event_part1, &event_part2);
+		}
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: Enqueueing kernel Part 2 failed.", status);
+			clReleaseEvent(event_part1);
+			if (event_part2) clReleaseEvent(event_part2);
+			return -1;
+		}
+		
+		// Set arguments for Part 3: (input, temp_X, output, target)
+		num = 0;
+		status = clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->CLbuffer0);
+		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->temp_X_buffer);
+		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->outputBuffer);
+		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_uint), &le_target);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clSetKernelArg Part 3 failed.", status);
+			clReleaseEvent(event_part1);
+			clReleaseEvent(event_part2);
+			return -1;
+		}
+		
+		// Launch Part 3 (wait for Part 2)
+		if (clState->goffset) {
+			size_t global_work_offset[1] = { work->blk.nonce };
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part3, 1, 
+			                                global_work_offset, globalThreads, localThreads,
+			                                1, &event_part2, &event_part3);
+		} else {
+			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part3, 1, NULL,
+			                                globalThreads, localThreads, 1, &event_part2, &event_part3);
+		}
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: Enqueueing kernel Part 3 failed.", status);
+			clReleaseEvent(event_part1);
+			clReleaseEvent(event_part2);
+			if (event_part3) clReleaseEvent(event_part3);
+			return -1;
+		}
+		
+		// Use event_part3 as the main kernel event for profiling
+		kernel_event = event_part3;
+		
+		// Store references to intermediate events for cleanup after clFinish()
+		// (OpenCL command queue maintains its own references via wait lists)
+		split_event_part1 = event_part1;
+		split_event_part2 = event_part2;
+		
+		applog(LOG_DEBUG, "Split kernels executed (Part 1 -> 2 -> 3)");
+	} else {
+		// ===== MONOLITHIC KERNEL EXECUTION =====
+		status = thrdata->queue_kernel_parameters(clState, &work->blk, globalThreads[0]);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error: clSetKernelArg of all params failed.");
+			return -1;
+		}
+
+		// Enqueue kernel with profiling enabled
+		if (clState->goffset) {
+			size_t global_work_offset[1];
+
+			global_work_offset[0] = work->blk.nonce;
+			if (opt_scrypt_chacha)
+			applog(LOG_DEBUG, "Nonce: %u, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
+			status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, global_work_offset,
+							globalThreads, localThreads, 0, NULL, &kernel_event);
+		} else
+			status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, NULL,
+							globalThreads, localThreads, 0, NULL, &kernel_event);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: Enqueueing kernel onto command queue. (clEnqueueNDRangeKernel)", status);
+			if (kernel_event) clReleaseEvent(kernel_event);
+			return -1;
+		}
 	}
 
-	// Enqueue kernel with profiling enabled
-	if (clState->goffset) {
-		size_t global_work_offset[1];
-
-		global_work_offset[0] = work->blk.nonce;
-		if (opt_scrypt_chacha)
-		applog(LOG_DEBUG, "Nonce: %u, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
-		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, global_work_offset,
-						globalThreads, localThreads, 0, NULL, &kernel_event);
-	} else
-		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, NULL,
-						globalThreads, localThreads, 0, NULL, &kernel_event);
-	if (unlikely(status != CL_SUCCESS)) {
-		applog(LOG_ERR, "Error %d: Enqueueing kernel onto command queue. (clEnqueueNDRangeKernel)", status);
-		if (kernel_event) clReleaseEvent(kernel_event);
-		return -1;
-	}
-
-	// Enqueue read buffer with profiling
+	// Enqueue read buffer with profiling (wait for kernel to complete)
+	// For split kernels, kernel_event is event_part3; for monolithic, it's the kernel event
+	// This ensures we don't read results before the kernels finish executing
+	const cl_event *wait_list = kernel_event ? &kernel_event : NULL;
+	const cl_uint num_wait_events = kernel_event ? 1 : 0;
 	status = clEnqueueReadBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
-				     buffersize, thrdata->res, 0, NULL, &read_event);
+				     buffersize, thrdata->res, 
+				     num_wait_events, wait_list, 
+				     &read_event);
 	if (unlikely(status != CL_SUCCESS)) {
 		applog(LOG_ERR, "Error: clEnqueueReadBuffer failed error %d. (clEnqueueReadBuffer)", status);
 		if (kernel_event) clReleaseEvent(kernel_event);
@@ -1991,10 +2162,16 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		clFinish(clState->commandQueue);
 	}
 
-	// Clean up events
+	// Clean up events (after clFinish ensures all operations are complete)
 	if (kernel_event) clReleaseEvent(kernel_event);
 	if (read_event) clReleaseEvent(read_event);
 	if (write_event) clReleaseEvent(write_event);
+	
+	// Clean up split kernel intermediate events (they're only needed for dependency chaining)
+	if (use_split) {
+		if (split_event_part1) clReleaseEvent(split_event_part1);
+		if (split_event_part2) clReleaseEvent(split_event_part2);
+	}
 
 	return hashes;
 }
@@ -2004,7 +2181,19 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 	const int thr_id = thr->id;
 	_clState *clState = clStates[thr_id];
 
-	clReleaseKernel(clState->kernel);
+	// Release split kernels if they were created
+#ifdef USE_SCRYPT
+	if (clState->use_split_kernels) {
+		if (clState->kernel_part1) clReleaseKernel(clState->kernel_part1);
+		if (clState->kernel_part2) clReleaseKernel(clState->kernel_part2);
+		if (clState->kernel_part3) clReleaseKernel(clState->kernel_part3);
+		if (clState->temp_X_buffer) clReleaseMemObject(clState->temp_X_buffer);
+		applog(LOG_DEBUG, "Released split kernel resources");
+	}
+#endif
+	
+	// Release monolithic kernel
+	if (clState->kernel) clReleaseKernel(clState->kernel);
 	clReleaseProgram(clState->program);
 	clReleaseCommandQueue(clState->commandQueue);
 	clReleaseContext(clState->context);
