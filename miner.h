@@ -1002,11 +1002,13 @@ extern bool opt_scrypt_chacha;
 extern bool opt_scrypt_chacha_84;
 extern int opt_fixed_nfactor;
 extern bool opt_n_scrypt;
+extern char *opt_kernel_chacha;
 #else
 #define opt_scrypt (0)
 #define opt_scrypt_chacha (0)
 #define opt_scrypt_chacha_84 (0)
 #define opt_n_scrypt (0)
+#define opt_kernel_chacha (NULL)
 #endif
 extern double total_secs;
 extern int mining_threads;

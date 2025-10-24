@@ -978,3 +978,90 @@ const uint target)
 	if (result)
 		SETFOUND(gid);
 }
+
+// Split kernel for initial PBKDF2
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void initialPBKDF2(__global const uint4 * restrict input,
+volatile __global uint * restrict output, __global uchar * restrict padcache,
+const uint target)
+{
+	uint4 password[6];  // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
+	uint4 X[8];
+	const uint gid = get_global_id(0);
+
+	// Copy 84 bytes (5.25 uint4) from input
+	password[0] = input[0];  // bytes 0-15
+	password[1] = input[1];  // bytes 16-31
+	password[2] = input[2];  // bytes 32-47
+	password[3] = input[3];  // bytes 48-63
+	password[4] = input[4];  // bytes 64-79
+	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
+	
+	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
+	scrypt_pbkdf2_128B_84(password, password, X);
+}
+
+// Split kernel for ROMix
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void ROMix(__global const uint4 * restrict input,
+volatile __global uint * restrict output, __global uchar * restrict padcache,
+const uint target)
+{
+	uint4 X[8];
+	const uint gid = get_global_id(0);
+	
+	// Copy 84 bytes (5.25 uint4) from input
+	X[0] = input[0];  // bytes 0-15
+	X[1] = input[1];  // bytes 16-31
+	X[2] = input[2];  // bytes 32-47
+	X[3] = input[3];  // bytes 48-63
+	X[4] = input[4];  // bytes 64-79
+	X[5] = input[0];  // bytes 80-95 (only first 4 bytes used for block header)
+	X[6] = input[1];  // bytes 96-111
+	X[7] = input[2];  // bytes 112-127
+	X[7].w = gid;
+
+	/* 2: X = ROMix(X) */
+	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
+
+}
+
+// Split kernel for final PBKDF2
+__attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
+__kernel void finalPBKDF2(__global const uint4 * restrict input,
+volatile __global uint * restrict output, __global uchar * restrict padcache,
+const uint target)
+{
+	uint4 password[6];  // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
+	uint4 X[8];
+	uint output_hash[8] __attribute__ ((aligned (16)));
+	const uint gid = get_global_id(0);
+	
+	// Copy 84 bytes (5.25 uint4) from input
+	password[0] = input[0];  // bytes 0-15
+	password[1] = input[1];  // bytes 16-31
+	password[2] = input[2];  // bytes 32-47
+	password[3] = input[3];  // bytes 48-63
+	password[4] = input[4];  // bytes 64-79
+	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
+	
+	// Copy 128 bytes (8 uint4) from input
+	X[0] = input[0];  // bytes 0-15
+	X[1] = input[1];  // bytes 16-31
+	X[2] = input[2];  // bytes 32-47
+	X[3] = input[3];  // bytes 48-63
+	X[4] = input[4];  // bytes 64-79
+	X[5] = input[0];  // bytes 80-95 (only first 4 bytes used for block header)
+	X[6] = input[1];  // bytes 96-111
+	X[7] = input[2];  // bytes 112-127
+	X[7].w = gid;
+
+	/* 3: Out = PBKDF2(password, X) */
+	scrypt_pbkdf2_32B_84(password, X, (uint4 *)output_hash);
+	
+	bool result = (output_hash[7] <= target);
+	if (result)
+		SETFOUND(gid);
+}

@@ -863,7 +863,13 @@ built:
 	}
 
 	/* get a kernel object handle for a kernel with the given name */
-	const char *kernel_name = (opt_scrypt_chacha_84) ? "search84" : "search";
+	const char *kernel_name;
+	if (opt_kernel_chacha) {
+		kernel_name = opt_kernel_chacha;
+	} else {
+		kernel_name = (opt_scrypt_chacha_84) ? "search84" : "search";
+	}
+	applog(LOG_DEBUG, "Using kernel: %s", kernel_name);
 	clState->kernel = clCreateKernel(clState->program, kernel_name, &status);
 	if (status != CL_SUCCESS) {
 		applog(LOG_ERR, "Error %d: Creating Kernel from program. (clCreateKernel)", status);

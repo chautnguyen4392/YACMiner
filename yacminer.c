@@ -170,6 +170,7 @@ cgsem_t usb_resource_sem;
 #endif
 
 char *opt_kernel_path;
+char *opt_kernel_chacha = NULL;
 char *cgminer_path;
 
 #if defined(USE_BITFORCE)
@@ -1030,6 +1031,18 @@ static char *set_scrypt_chacha_84(void)
 	return NULL;
 }
 
+static char *set_kernel_chacha(const char *arg)
+{
+	if (strcmp(arg, "initialPBKDF2") == 0 || 
+	    strcmp(arg, "ROMix") == 0 || 
+	    strcmp(arg, "finalPBKDF2") == 0) {
+		free(opt_kernel_chacha);
+		opt_kernel_chacha = strdup(arg);
+		return NULL;
+	}
+	return "kernel-chacha must be one of: initialPBKDF2, ROMix, finalPBKDF2";
+}
+
 unsigned char Get_SC_Nfactor(unsigned int nTimestamp, int minn, int maxn, long starttime) {
     int l = 0;
 
@@ -1392,6 +1405,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt-chacha-84",
 			set_scrypt_chacha_84, NULL,
 			"Use the scrypt-chacha algorithm for mining with 84-byte block headers (8-byte timestamp)"),
+	OPT_WITH_ARG("--kernel-chacha",
+		     set_kernel_chacha, NULL, NULL,
+		     "Select kernel for scrypt-chacha (initialPBKDF2, ROMix, finalPBKDF2)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),
