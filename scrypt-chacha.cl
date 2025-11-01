@@ -1023,6 +1023,9 @@ __kernel void search84_part1(
 	uint4 password[6]; // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
 	uint4 X[8];
 	const uint gid = get_global_id(0);
+	// Calculate local work item index (0 to num_work_items-1) for temp_X buffer indexing
+	// This works correctly even when global_work_offset is used
+	const uint tid = get_group_id(0) * get_local_size(0) + get_local_id(0);
 	
 	// Load password (84 bytes)
 	password[0] = input[0];  // bytes 0-15
@@ -1037,8 +1040,8 @@ __kernel void search84_part1(
 	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
 	scrypt_pbkdf2_128B_84(password, password, X);
 	
-	// Store X to global memory for next kernel
-	const uint offset = gid * 8;
+	// Store X to global memory for next kernel (use tid, not gid, for buffer indexing)
+	const uint offset = tid * 8;
 	#pragma unroll
 	for (uint i = 0; i < 8; i++) {
 		temp_X[offset + i] = X[i];
@@ -1056,7 +1059,10 @@ __kernel void search84_part2(
 {
 	uint4 X[8];
 	const uint gid = get_global_id(0);
-	const uint offset = gid * 8;
+	// Calculate local work item index (0 to num_work_items-1) for temp_X buffer indexing
+	// This works correctly even when global_work_offset is used
+	const uint tid = get_group_id(0) * get_local_size(0) + get_local_id(0);
+	const uint offset = tid * 8;
 	
 	// Load X from global memory
 	#pragma unroll
@@ -1090,7 +1096,10 @@ __kernel void search84_part3(
 	uint4 X[8];
 	uint output_hash[8] __attribute__ ((aligned (16)));
 	const uint gid = get_global_id(0);
-	const uint offset = gid * 8;
+	// Calculate local work item index (0 to num_work_items-1) for temp_X buffer indexing
+	// This works correctly even when global_work_offset is used
+	const uint tid = get_group_id(0) * get_local_size(0) + get_local_id(0);
+	const uint offset = tid * 8;
 	
 	// Load password (84 bytes)
 	// Copy 84 bytes (5.25 uint4) from input
