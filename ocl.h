@@ -28,7 +28,8 @@ typedef struct {
 	cl_kernel kernel_part1;
 	cl_kernel kernel_part2;
 	cl_kernel kernel_part3;
-	cl_mem temp_X_buffer;  // Intermediate buffer for split kernels
+	cl_mem temp_X_buffer;   // Intermediate buffer for split kernels (Part 1 output)
+	cl_mem temp_X2_buffer;  // Intermediate buffer for split kernels (Part 2 output)
 	bool use_split_kernels;
 #endif
 	bool hasBitAlign;

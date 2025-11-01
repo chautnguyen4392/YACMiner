@@ -968,14 +968,15 @@ built:
 		}
 		clState->outputBuffer = clCreateBuffer(clState->context, CL_MEM_WRITE_ONLY, SCRYPT_BUFFERSIZE, NULL, &status);
 		
-		// Create temp_X buffer for split kernels if enabled
+		// Create temp_X and temp_X2 buffers for split kernels if enabled
 		if (clState->use_split_kernels) {
-			// temp_X needs to hold 8 uint4 values per thread
+			// temp_X and temp_X2 need to hold 8 uint4 values per thread
 			// Size = thread_concurrency * 8 * sizeof(cl_uint4)
 			size_t temp_X_size = cgpu->thread_concurrency * 8 * sizeof(cl_uint4);
 			applog(LOG_INFO, "Creating temp_X buffer of %lu bytes (%lu MB) for split kernels",
 			       (unsigned long)temp_X_size, (unsigned long)(temp_X_size / (1024 * 1024)));
 			
+			// Create temp_X_buffer (Part 1 output, Part 2 input)
 			clState->temp_X_buffer = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
 			                                        temp_X_size, NULL, &status);
 			if (status != CL_SUCCESS) {
@@ -984,9 +985,21 @@ built:
 				applog(LOG_ERR, "Try reducing thread concurrency or disabling split kernels");
 				return NULL;
 			}
-			applog(LOG_INFO, "temp_X buffer created successfully");
+			
+			// Create temp_X2_buffer (Part 2 output, Part 3 input)
+			clState->temp_X2_buffer = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
+			                                         temp_X_size, NULL, &status);
+			if (status != CL_SUCCESS || !clState->temp_X2_buffer) {
+				applog(LOG_ERR, "Error %d: clCreateBuffer (temp_X2_buffer) failed, size: %lu bytes", 
+				       status, (unsigned long)temp_X_size);
+				clReleaseMemObject(clState->temp_X_buffer);
+				applog(LOG_ERR, "Try reducing thread concurrency or disabling split kernels");
+				return NULL;
+			}
+			applog(LOG_INFO, "temp_X and temp_X2 buffers created successfully");
 		} else {
 			clState->temp_X_buffer = NULL;
+			clState->temp_X2_buffer = NULL;
 		}
 	} else
 #endif
