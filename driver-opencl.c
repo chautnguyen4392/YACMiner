@@ -1797,7 +1797,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	cl_event kernel_event = NULL;
 	cl_event read_event = NULL;
 	cl_event write_event = NULL;
-	// For split kernels: track intermediate events for proper cleanup
+	// For split kernels: track intermediate events for proper cleanup and profiling
 	cl_event split_event_part1 = NULL;
 	cl_event split_event_part2 = NULL;
 	cl_ulong kernel_start_time = 0, kernel_end_time = 0;
@@ -1805,9 +1805,22 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	cl_ulong write_start_time = 0, write_end_time = 0;
 	cl_ulong kernel_execution_time = 0;
 	cl_ulong total_execution_time = 0;
+	
+	// Split kernel profiling variables
+	cl_ulong part1_start = 0, part1_end = 0, part1_time = 0;
+	cl_ulong part2_start = 0, part2_end = 0, part2_time = 0;
+	cl_ulong part3_start = 0, part3_end = 0, part3_time = 0;
+	cl_ulong gap_1_to_2 = 0, gap_2_to_3 = 0;
+	
 	static int profiling_counter = 0;
 	static double avg_kernel_time = 0.0;
 	static double avg_total_time = 0.0;
+	// Per-part averages for split kernels
+	static double avg_part1_time = 0.0;
+	static double avg_part2_time = 0.0;
+	static double avg_part3_time = 0.0;
+	static double avg_gap_1_to_2 = 0.0;
+	static double avg_gap_2_to_3 = 0.0;
 	
 	// Fallback timing mechanism
 	struct timeval start_time, end_time;
@@ -1989,7 +2002,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		// Use event_part3 as the main kernel event for profiling
 		kernel_event = event_part3;
 		
-		// Store references to intermediate events for cleanup after clFinish()
+		// Store references to intermediate events for cleanup and profiling after clFinish()
 		// (OpenCL command queue maintains its own references via wait lists)
 		split_event_part1 = event_part1;
 		split_event_part2 = event_part2;
@@ -2090,6 +2103,50 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		}
 	}
 	
+	// Get detailed profiling for split kernels (Part 1, 2, 3 separately)
+	if (use_split && split_event_part1 && split_event_part2 && kernel_event) {
+		// Profile Part 1
+		status = clGetEventProfilingInfo(split_event_part1, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part1_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(split_event_part1, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part1_end, NULL);
+			if (status == CL_SUCCESS) {
+				part1_time = part1_end - part1_start;
+			}
+		}
+		
+		// Profile Part 2
+		status = clGetEventProfilingInfo(split_event_part2, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part2_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(split_event_part2, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part2_end, NULL);
+			if (status == CL_SUCCESS) {
+				part2_time = part2_end - part2_start;
+			}
+		}
+		
+		// Profile Part 3 (kernel_event)
+		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part3_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part3_end, NULL);
+			if (status == CL_SUCCESS) {
+				part3_time = part3_end - part3_start;
+			}
+		}
+		
+		// Calculate gaps between kernels (overhead/synchronization time)
+		if (part1_end > 0 && part2_start > 0) {
+			gap_1_to_2 = part2_start - part1_end;
+		}
+		if (part2_end > 0 && part3_start > 0) {
+			gap_2_to_3 = part3_start - part2_end;
+		}
+	}
+	
 	// Use fallback timing if OpenCL profiling failed
 	if (kernel_execution_time == 0) {
 		long fallback_time_us = (end_time.tv_sec - start_time.tv_sec) * 1000000 + 
@@ -2103,9 +2160,23 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	if (profiling_counter == 1) {
 		avg_kernel_time = kernel_execution_time;
 		avg_total_time = total_execution_time;
+		if (use_split) {
+			avg_part1_time = part1_time;
+			avg_part2_time = part2_time;
+			avg_part3_time = part3_time;
+			avg_gap_1_to_2 = gap_1_to_2;
+			avg_gap_2_to_3 = gap_2_to_3;
+		}
 	} else {
 		avg_kernel_time = (avg_kernel_time * (profiling_counter - 1) + kernel_execution_time) / profiling_counter;
 		avg_total_time = (avg_total_time * (profiling_counter - 1) + total_execution_time) / profiling_counter;
+		if (use_split) {
+			avg_part1_time = (avg_part1_time * (profiling_counter - 1) + part1_time) / profiling_counter;
+			avg_part2_time = (avg_part2_time * (profiling_counter - 1) + part2_time) / profiling_counter;
+			avg_part3_time = (avg_part3_time * (profiling_counter - 1) + part3_time) / profiling_counter;
+			avg_gap_1_to_2 = (avg_gap_1_to_2 * (profiling_counter - 1) + gap_1_to_2) / profiling_counter;
+			avg_gap_2_to_3 = (avg_gap_2_to_3 * (profiling_counter - 1) + gap_2_to_3) / profiling_counter;
+		}
 	}
 
 	// Log profiling info every iteration
@@ -2128,10 +2199,50 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	// Determine timing method used
 	const char* timing_method = (kernel_start_time == 0) ? " [Fallback]" : " [OpenCL]";
 	
-	applog(LOG_INFO, "GPU %d Profiling [%d]: Kernel: %.2fms (avg: %.2fms), Total: %.2fms (avg: %.2fms), "
-	       "Work Items: %lu, Memory: %.2fGB/s, Est. Occupancy: %.1f%%, Private Mem: ~2.4KB/workitem%s",
-	       gpu->device_id, profiling_counter, kernel_time_ms, avg_kernel_ms, total_time_ms, avg_total_ms,
-	       (unsigned long)globalThreads[0], bandwidth_gbps, estimated_occupancy, timing_method);
+	// Log detailed split kernel profiling if enabled
+	if (use_split && part1_time > 0 && part2_time > 0 && part3_time > 0) {
+		double part1_ms = part1_time / 1000000.0;
+		double part2_ms = part2_time / 1000000.0;
+		double part3_ms = part3_time / 1000000.0;
+		double gap_1_to_2_ms = gap_1_to_2 / 1000000.0;
+		double gap_2_to_3_ms = gap_2_to_3 / 1000000.0;
+		double total_split_ms = part1_ms + part2_ms + part3_ms + gap_1_to_2_ms + gap_2_to_3_ms;
+		
+		double avg_part1_ms = avg_part1_time / 1000000.0;
+		double avg_part2_ms = avg_part2_time / 1000000.0;
+		double avg_part3_ms = avg_part3_time / 1000000.0;
+		double avg_gap_1_to_2_ms = avg_gap_1_to_2 / 1000000.0;
+		double avg_gap_2_to_3_ms = avg_gap_2_to_3 / 1000000.0;
+		double avg_total_split_ms = avg_part1_ms + avg_part2_ms + avg_part3_ms + avg_gap_1_to_2_ms + avg_gap_2_to_3_ms;
+		
+		// Calculate percentage breakdown
+		double part1_pct = (part1_ms / total_split_ms) * 100.0;
+		double part2_pct = (part2_ms / total_split_ms) * 100.0;
+		double part3_pct = (part3_ms / total_split_ms) * 100.0;
+		double gap_pct = ((gap_1_to_2_ms + gap_2_to_3_ms) / total_split_ms) * 100.0;
+		
+		applog(LOG_INFO, "GPU %d Split Kernel Profiling [%d]:", gpu->device_id, profiling_counter);
+		applog(LOG_INFO, "  Part 1 (PBKDF2):    %.3fms (avg: %.3fms) [%.1f%%]",
+		       part1_ms, avg_part1_ms, part1_pct);
+		applog(LOG_INFO, "  Part 2 (ROMix):     %.3fms (avg: %.3fms) [%.1f%%]",
+		       part2_ms, avg_part2_ms, part2_pct);
+		applog(LOG_INFO, "  Part 3 (Final):     %.3fms (avg: %.3fms) [%.1f%%]",
+		       part3_ms, avg_part3_ms, part3_pct);
+		applog(LOG_INFO, "  Gap 1→2:            %.3fms (avg: %.3fms) - kernel launch overhead",
+		       gap_1_to_2_ms, avg_gap_1_to_2_ms);
+		applog(LOG_INFO, "  Gap 2→3:            %.3fms (avg: %.3fms) - kernel launch overhead",
+		       gap_2_to_3_ms, avg_gap_2_to_3_ms);
+		applog(LOG_INFO, "  Total kernel time:  %.3fms (avg: %.3fms) | Overhead: %.3fms (%.1f%%)",
+		       total_split_ms, avg_total_split_ms, gap_1_to_2_ms + gap_2_to_3_ms, gap_pct);
+		applog(LOG_INFO, "  End-to-end:         %.3fms (avg: %.3fms) - includes read buffer",
+		       total_time_ms, avg_total_ms);
+	} else {
+		// Monolithic kernel profiling (original)
+		applog(LOG_INFO, "GPU %d Profiling [%d]: Kernel: %.2fms (avg: %.2fms), Total: %.2fms (avg: %.2fms), "
+		       "Work Items: %lu, Memory: %.2fGB/s, Est. Occupancy: %.1f%%, Private Mem: ~2.4KB/workitem%s",
+		       gpu->device_id, profiling_counter, kernel_time_ms, avg_kernel_ms, total_time_ms, avg_total_ms,
+		       (unsigned long)globalThreads[0], bandwidth_gbps, estimated_occupancy, timing_method);
+	}
 	
 	// Check for potential memory spilling indicators
 	if (kernel_time_ms > avg_kernel_ms * 1.5) {
