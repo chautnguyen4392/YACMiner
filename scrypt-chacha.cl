@@ -1011,20 +1011,24 @@ const uint target)
 	uint4 X[8];
 	const uint gid = get_global_id(0);
 	
-	// Copy 84 bytes (5.25 uint4) from input
-	X[0] = input[0];  // bytes 0-15
-	X[1] = input[1];  // bytes 16-31
-	X[2] = input[2];  // bytes 32-47
-	X[3] = input[3];  // bytes 48-63
-	X[4] = input[4];  // bytes 64-79
-	X[5] = input[0];  // bytes 80-95 (only first 4 bytes used for block header)
-	X[6] = input[1];  // bytes 96-111
-	X[7] = input[2];  // bytes 112-127
-	X[7].w = gid;
+	// Copy 8 uint4 (128 bytes) from input - this is the output from initialPBKDF2
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		X[i] = input[i];
+	}
 
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
 
+	// Write all 32 uint values (8 uint4) to output to prevent compiler optimization
+	// This ensures the compiler cannot optimize away the ROMix computation
+	#pragma unroll
+	for (uint i = 0; i < 8; i++) {
+		output[i * 4 + 0] = X[i].x;
+		output[i * 4 + 1] = X[i].y;
+		output[i * 4 + 2] = X[i].z;
+		output[i * 4 + 3] = X[i].w;
+	}
 }
 
 // Split kernel for final PBKDF2
