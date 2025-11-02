@@ -760,34 +760,34 @@ chacha_core(__private uint4 state[4]) {
 }
 
 // Local memory version of chacha_core
+// x_local: local memory buffer for temporary x array, each thread uses offset x_offset (4 uint4 per thread)
 static void
-chacha_core_local(__local uint4 *restrict state, const uint offset) {
-	uint4 x[4];
+chacha_core_local(__local uint4 *restrict state, const uint offset, __local uint4 *restrict x_local, const uint x_offset) {
 	uint4 t;
 	uint rounds;
 
-	x[0] = state[offset + 0];
-	x[1] = state[offset + 1];
-	x[2] = state[offset + 2];
-	x[3] = state[offset + 3];
+	x_local[x_offset + 0] = state[offset + 0];
+	x_local[x_offset + 1] = state[offset + 1];
+	x_local[x_offset + 2] = state[offset + 2];
+	x_local[x_offset + 3] = state[offset + 3];
 
 	#pragma unroll
 	for (rounds = 0; rounds < 4; rounds ++) {
-		x[0] += x[1]; t = x[3] ^ x[0]; x[3] = ROTL32(t, ROTATE_16);
-		x[2] += x[3]; t = x[1] ^ x[2]; x[1] = ROTL32(t, ROTATE_12);
-		x[0] += x[1]; t = x[3] ^ x[0]; x[3] = ROTL32(t, ROTATE_8);
-		x[2] += x[3]; t = x[1] ^ x[2]; x[1] = ROTL32(t, ROTATE_7);
+		x_local[x_offset + 0] += x_local[x_offset + 1]; t = x_local[x_offset + 3] ^ x_local[x_offset + 0]; x_local[x_offset + 3] = ROTL32(t, ROTATE_16);
+		x_local[x_offset + 2] += x_local[x_offset + 3]; t = x_local[x_offset + 1] ^ x_local[x_offset + 2]; x_local[x_offset + 1] = ROTL32(t, ROTATE_12);
+		x_local[x_offset + 0] += x_local[x_offset + 1]; t = x_local[x_offset + 3] ^ x_local[x_offset + 0]; x_local[x_offset + 3] = ROTL32(t, ROTATE_8);
+		x_local[x_offset + 2] += x_local[x_offset + 3]; t = x_local[x_offset + 1] ^ x_local[x_offset + 2]; x_local[x_offset + 1] = ROTL32(t, ROTATE_7);
 		
-		x[0]      += x[1].yzwx; t = x[3].wxyz ^ x[0];      x[3].wxyz = ROTL32(t, ROTATE_16);
-		x[2].zwxy += x[3].wxyz; t = x[1].yzwx ^ x[2].zwxy; x[1].yzwx = ROTL32(t, ROTATE_12);
-		x[0]      += x[1].yzwx; t = x[3].wxyz ^ x[0];      x[3].wxyz = ROTL32(t, ROTATE_8);
-		x[2].zwxy += x[3].wxyz; t = x[1].yzwx ^ x[2].zwxy; x[1].yzwx = ROTL32(t, ROTATE_7);
+		x_local[x_offset + 0]      += x_local[x_offset + 1].yzwx; t = x_local[x_offset + 3].wxyz ^ x_local[x_offset + 0];      x_local[x_offset + 3].wxyz = ROTL32(t, ROTATE_16);
+		x_local[x_offset + 2].zwxy += x_local[x_offset + 3].wxyz; t = x_local[x_offset + 1].yzwx ^ x_local[x_offset + 2].zwxy; x_local[x_offset + 1].yzwx = ROTL32(t, ROTATE_12);
+		x_local[x_offset + 0]      += x_local[x_offset + 1].yzwx; t = x_local[x_offset + 3].wxyz ^ x_local[x_offset + 0];      x_local[x_offset + 3].wxyz = ROTL32(t, ROTATE_8);
+		x_local[x_offset + 2].zwxy += x_local[x_offset + 3].wxyz; t = x_local[x_offset + 1].yzwx ^ x_local[x_offset + 2].zwxy; x_local[x_offset + 1].yzwx = ROTL32(t, ROTATE_7);
 	}
 
-	state[offset + 0] += x[0];
-	state[offset + 1] += x[1];
-	state[offset + 2] += x[2];
-	state[offset + 3] += x[3];
+	state[offset + 0] += x_local[x_offset + 0];
+	state[offset + 1] += x_local[x_offset + 1];
+	state[offset + 2] += x_local[x_offset + 2];
+	state[offset + 3] += x_local[x_offset + 3];
 }
 
 static void
@@ -853,8 +853,9 @@ scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 }
 
 // Local memory version of scrypt_ChunkMix_inplace_Bxor_local
+// x_local: local memory buffer for temporary x array in chacha_core
 static void
-scrypt_ChunkMix_inplace_Bxor_local_local(__local uint4 *restrict B/*[chunkWords]*/, const uint B_offset, __local uint4 *restrict Bxor/*[chunkWords]*/, const uint Bxor_offset) {
+scrypt_ChunkMix_inplace_Bxor_local_local(__local uint4 *restrict B/*[chunkWords]*/, const uint B_offset, __local uint4 *restrict Bxor/*[chunkWords]*/, const uint Bxor_offset, __local uint4 *restrict x_local, const uint x_offset) {
 	/* 1: X = B_{2r - 1} */
 
 	/* 2: for i = 0 to 2r - 1 do */
@@ -864,7 +865,7 @@ scrypt_ChunkMix_inplace_Bxor_local_local(__local uint4 *restrict B/*[chunkWords]
 		B[B_offset + 2] ^= B[B_offset + 6] ^ Bxor[Bxor_offset + 6] ^ Bxor[Bxor_offset + 2];
 		B[B_offset + 3] ^= B[B_offset + 7] ^ Bxor[Bxor_offset + 7] ^ Bxor[Bxor_offset + 3];
 		
-		/* SCRYPT_MIX_FN */ chacha_core_local(B, B_offset);
+		/* SCRYPT_MIX_FN */ chacha_core_local(B, B_offset, x_local, x_offset);
 
 		/* 4: Y_i = X */
 		/* 6: B'[0..r-1] = Y_even */
@@ -877,7 +878,7 @@ scrypt_ChunkMix_inplace_Bxor_local_local(__local uint4 *restrict B/*[chunkWords]
 		B[B_offset + 6] ^= B[B_offset + 2] ^ Bxor[Bxor_offset + 6];
 		B[B_offset + 7] ^= B[B_offset + 3] ^ Bxor[Bxor_offset + 7];
 		
-		/* SCRYPT_MIX_FN */ chacha_core_local(B, B_offset + 4);
+		/* SCRYPT_MIX_FN */ chacha_core_local(B, B_offset + 4, x_local, x_offset);
 
 		/* 4: Y_i = X */
 		/* 6: B'[0..r-1] = Y_even */
@@ -885,8 +886,9 @@ scrypt_ChunkMix_inplace_Bxor_local_local(__local uint4 *restrict B/*[chunkWords]
 }
 
 // Local memory version of scrypt_ChunkMix_inplace_local
+// x_local: local memory buffer for temporary x array in chacha_core
 static void
-scrypt_ChunkMix_inplace_local_local(__local uint4 *restrict B/*[chunkWords]*/, const uint offset) {
+scrypt_ChunkMix_inplace_local_local(__local uint4 *restrict B/*[chunkWords]*/, const uint offset, __local uint4 *restrict x_local, const uint x_offset) {
 	/* 1: X = B_{2r - 1} */
 
 	/* 2: for i = 0 to 2r - 1 do */
@@ -896,7 +898,7 @@ scrypt_ChunkMix_inplace_local_local(__local uint4 *restrict B/*[chunkWords]*/, c
 		B[offset + 2] ^= B[offset + 6];
 		B[offset + 3] ^= B[offset + 7];
 
-		/* SCRYPT_MIX_FN */ chacha_core_local(B, offset);
+		/* SCRYPT_MIX_FN */ chacha_core_local(B, offset, x_local, x_offset);
 
 		/* 4: Y_i = X */
 		/* 6: B'[0..r-1] = Y_even */
@@ -909,7 +911,7 @@ scrypt_ChunkMix_inplace_local_local(__local uint4 *restrict B/*[chunkWords]*/, c
 		B[offset + 6] ^= B[offset + 2];
 		B[offset + 7] ^= B[offset + 3];
 
-		/* SCRYPT_MIX_FN */ chacha_core_local(B, offset + 4);
+		/* SCRYPT_MIX_FN */ chacha_core_local(B, offset + 4, x_local, x_offset);
 
 		/* 4: Y_i = X */
 		/* 6: B'[0..r-1] = Y_even */
@@ -992,8 +994,9 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 // Local memory version of scrypt_ROMix
 // X_local: local memory buffer for X, each thread uses offset X_offset (8 uint4 per thread)
 // W_local: local memory buffer for W, each thread uses offset W_offset (8 uint4 per thread)
+// x_local: local memory buffer for temporary x array in chacha_core, each thread uses offset x_offset (4 uint4 per thread)
 static void
-scrypt_ROMix_local(__local uint4 *restrict X_local/*[chunkWords]*/, const uint X_offset, __local uint4 *restrict W_local/*[chunkWords]*/, const uint W_offset, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
+scrypt_ROMix_local(__local uint4 *restrict X_local/*[chunkWords]*/, const uint X_offset, __local uint4 *restrict W_local/*[chunkWords]*/, const uint W_offset, __local uint4 *restrict x_local, const uint x_offset, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
 	const uint xSIZE = CONCURRENT_THREADS;
@@ -1019,7 +1022,7 @@ scrypt_ROMix_local(__local uint4 *restrict X_local/*[chunkWords]*/, const uint X
 		/* TACA: Mix X LOOKUP_GAP times before next store */
 		for (j = 0; j < LOOKUP_GAP; j++) {
 			/* 4: X = H(X) */
-			scrypt_ChunkMix_inplace_local_local(X_local, X_offset);
+			scrypt_ChunkMix_inplace_local_local(X_local, X_offset, x_local, x_offset);
 		}
 	}
 
@@ -1043,18 +1046,18 @@ scrypt_ROMix_local(__local uint4 *restrict X_local/*[chunkWords]*/, const uint X
 #elif (LOOKUP_GAP == 2)
 		/* TACA: One extra mix */
 		if (j & 1) {
-			scrypt_ChunkMix_inplace_local_local(W_local, W_offset);
+			scrypt_ChunkMix_inplace_local_local(W_local, W_offset, x_local, x_offset);
 		}
 #else
 		/* TACA: Multiple extra mixes */
 		uint c = j % LOOKUP_GAP;
 		for (uint k = 0; k < c; k++) {
-			scrypt_ChunkMix_inplace_local_local(W_local, W_offset);
+			scrypt_ChunkMix_inplace_local_local(W_local, W_offset, x_local, x_offset);
 		}
 #endif
 
 		/* 8: X = H(X ^ V_j) */
-		scrypt_ChunkMix_inplace_Bxor_local_local(X_local, X_offset, W_local, W_offset);
+		scrypt_ChunkMix_inplace_Bxor_local_local(X_local, X_offset, W_local, W_offset, x_local, x_offset);
 	}
 
 	/* 10: B' = X */
@@ -1204,17 +1207,20 @@ __kernel void search84_part1(
 
 // Part 2: ROMix
 // Computes: X → X', loads X from temp_X, stores result to temp_X2
-// Uses local memory for X and W to reduce register pressure
+// Uses local memory for X, W, and x to reduce register pressure
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part2(
 	__global const uint4 * restrict temp_X,      // X from part1 (read-only)
 	__global uint4 * restrict temp_X2,           // X' after ROMix (write-only)
 	__global uchar * restrict padcache)
 {
-	// Local memory buffers: WORKSIZE threads * 8 uint4 per thread for X and W
-	// Each thread uses its own portion: thread i uses [i*8 ... i*8+7]
+	// Local memory buffers:
+	// - WORKSIZE threads * 8 uint4 per thread for X and W
+	// - WORKSIZE threads * 4 uint4 per thread for x (temporary in chacha_core)
+	// Each thread uses its own portion: thread i uses [i*8 ... i*8+7] for X/W, [i*4 ... i*4+3] for x
 	__local uint4 X_local[WORKSIZE * 8];
 	__local uint4 W_local[WORKSIZE * 8];
+	__local uint4 x_local[WORKSIZE * 4];
 	
 	const uint gid = get_global_id(0);
 	const uint lid = get_local_id(0);
@@ -1224,6 +1230,7 @@ __kernel void search84_part2(
 	const uint offset = tid * 8;
 	const uint X_local_offset = lid * 8;
 	const uint W_local_offset = lid * 8;
+	const uint x_local_offset = lid * 4;
 	
 	// Load X from global memory (from Part 1) into local memory
 	#pragma unroll
@@ -1236,7 +1243,7 @@ __kernel void search84_part2(
 	
 	// ROMix (the heavy computation) using local memory
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix_local(X_local, X_local_offset, W_local, W_local_offset, (__global uint4 *)padcache, gid);
+	scrypt_ROMix_local(X_local, X_local_offset, W_local, W_local_offset, x_local, x_local_offset, (__global uint4 *)padcache, gid);
 	
 	// Ensure all threads have finished computation before writing
 	barrier(CLK_LOCAL_MEM_FENCE);
@@ -1248,7 +1255,7 @@ __kernel void search84_part2(
 		temp_X2[offset + i] = X_local[X_local_offset + i];
 	}
 	
-	// Kernel ends: X_local and W_local are in local memory (shared per workgroup)
+	// Kernel ends: X_local, W_local, and x_local are in local memory (shared per workgroup)
 }
 
 // Part 3: Final PBKDF2 and result check
