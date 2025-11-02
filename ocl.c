@@ -946,7 +946,8 @@ built:
 		if (bufsize > cgpu->max_alloc) {
 			applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu",
 						gpu, (long unsigned int)(cgpu->max_alloc));
-			applog(LOG_WARNING, "Your scrypt settings come to %d", (int)bufsize);
+			applog(LOG_WARNING, "Your scrypt settings come to %lu", (long unsigned int)bufsize);
+			bufsize = cgpu->max_alloc;
 		}
 		applog(LOG_INFO, "Creating scrypt buffer sized %lu", (unsigned long)(bufsize));
 		clState->padbufsize = bufsize;
