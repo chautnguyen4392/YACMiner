@@ -1077,10 +1077,10 @@ __kernel void search84_part2(
 	
 	// Store updated X to separate buffer (avoids overwriting Part 1's output)
 	// This write to a new location may improve performance vs overwriting temp_X
-	#pragma unroll
-	for (uint i = 0; i < 8; i++) {
-		temp_X2[offset + i] = X[i];
-	}
+	// #pragma unroll
+	// for (uint i = 0; i < 8; i++) {
+	// 	temp_X2[offset + i] = X[i];
+	// }
 	
 	// Kernel ends: X[8] and W[8] freed
 }
