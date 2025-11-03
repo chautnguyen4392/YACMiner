@@ -1001,6 +1001,7 @@ extern bool opt_scrypt;
 extern bool opt_scrypt_chacha;
 extern bool opt_scrypt_chacha_84;
 extern bool opt_scrypt_split_kernels;
+extern bool opt_padbuffer_host_memory;  // Use CL_MEM_ALLOC_HOST_PTR for padbuffer8
 extern int opt_fixed_nfactor;
 extern bool opt_n_scrypt;
 #else

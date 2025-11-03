@@ -21,7 +21,7 @@ typedef struct {
 	cl_mem outputBuffer;
 #ifdef USE_SCRYPT
 	cl_mem CLbuffer0;
-	cl_mem padbuffer8;
+	cl_mem padbuffer8;  // Uses CL_MEM_ALLOC_HOST_PTR for host-allocated pinned memory
 	size_t padbufsize;
 	void * cldata;
 	// Split kernel support
