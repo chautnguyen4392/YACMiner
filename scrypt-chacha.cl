@@ -825,10 +825,10 @@ scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 #define CO Coord(z,x,y)
 
 static void
-scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
+scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid, const uint xSIZE_override) {
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
-	const uint xSIZE = CONCURRENT_THREADS;
+	const uint xSIZE = xSIZE_override;
 	const uint x = gid % xSIZE;
 	uint i, j, y, z;
 	uint4 W[8];
@@ -856,19 +856,19 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 		}
 	}
 
-#if (LOOKUP_GAP != 1) && (LOOKUP_GAP != 2) && (LOOKUP_GAP != 4) && (LOOKUP_GAP != 8)
-	if (N % LOOKUP_GAP > 0) {
-		y = N / LOOKUP_GAP;
+#if (N % LOOKUP_GAP > 0)
+       if (N % LOOKUP_GAP > 0) {
+               y = N / LOOKUP_GAP;
 
-		#pragma unroll
-		for (z = 0; z < zSIZE; z++) {
-			lookup[CO] = X[z];
-		}
+               #pragma unroll
+               for (z = 0; z < zSIZE; z++) {
+                       lookup[CO] = X[z];
+               }
 
-		for (j = 0; j < N % LOOKUP_GAP; j++) {
-			scrypt_ChunkMix_inplace_local(X);
-		}
-	}
+               for (j = 0; j < N % LOOKUP_GAP; j++) {
+                       scrypt_ChunkMix_inplace_local(X);
+               }
+       }
 #endif
 
 	/* TACA: Scratchpad Access Phase */
@@ -914,10 +914,21 @@ __constant uint ES[2] = { 0x00FF00FF, 0xFF00FF00 };
 #define SETFOUND(Xnonce) output[output[FOUND]++] = Xnonce
 #define EndianSwap(n) (rotate(n & Es2[0].x, 24U)|rotate(n & Es2[0].y, 8U))
 
+// Kernel for 80-byte block header
+// Supports multiple padbuffer8 buffers for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search(__global const uint4 * restrict input,
-volatile __global uint * restrict output, __global uchar * restrict padcache,
-const uint target)
+volatile __global uint * restrict output,
+#if NUM_PADBUFFERS >= 1
+__global uchar * restrict padcache0
+#endif
+#if NUM_PADBUFFERS >= 2
+, __global uchar * restrict padcache1
+#endif
+#if NUM_PADBUFFERS >= 3
+, __global uchar * restrict padcache2
+#endif
+, const uint target)
 {
 	uint4 password[5];
 	uint4 X[8];
@@ -934,8 +945,44 @@ const uint target)
 	/* 1: X = PBKDF2(password, salt) */
 	scrypt_pbkdf2_128B(password, password, X);
 
+	// Determine which padbuffer to use based on relative thread ID
+	// Calculate relative gid within the work batch first
+	// This works correctly with global_work_offset because get_group_id/get_local_id
+	// are relative to the work batch, not absolute
+	const uint group_id = get_group_id(0);
+	uint relative_gid = group_id * WORKSIZE + get_local_id(0);
+	__global uchar * padcache = (__global uchar *)0;
+	uint buffer_xSIZE = 0;
+	
+#if NUM_PADBUFFERS == 1
+	padcache = padcache0;
+	buffer_xSIZE = THREADS_PER_BUFFER_0;
+#elif NUM_PADBUFFERS == 2
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	}
+#elif NUM_PADBUFFERS == 3
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache2;
+		buffer_xSIZE = THREADS_PER_BUFFER_2;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	}
+#endif
+
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
+	scrypt_ROMix(X, (__global uint4 *)padcache, relative_gid, buffer_xSIZE);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B(password, X, (uint4 *)output_hash);
@@ -946,10 +993,20 @@ const uint target)
 }
 
 // New kernel for 84-byte block header (with 8-byte timestamp)
+// Supports multiple padbuffer8 buffers for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84(__global const uint4 * restrict input,
-volatile __global uint * restrict output, __global uchar * restrict padcache,
-const uint target)
+volatile __global uint * restrict output,
+#if NUM_PADBUFFERS >= 1
+__global uchar * restrict padcache0
+#endif
+#if NUM_PADBUFFERS >= 2
+, __global uchar * restrict padcache1
+#endif
+#if NUM_PADBUFFERS >= 3
+, __global uchar * restrict padcache2
+#endif
+, const uint target)
 {
 	uint4 password[6];  // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
 	uint4 X[8];
@@ -968,8 +1025,44 @@ const uint target)
 	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
 	scrypt_pbkdf2_128B_84(password, password, X);
 
+	// Determine which padbuffer to use based on relative thread ID
+	// Calculate relative gid within the work batch first
+	// This works correctly with global_work_offset because get_group_id/get_local_id
+	// are relative to the work batch, not absolute
+	const uint group_id = get_group_id(0);
+	uint relative_gid = group_id * WORKSIZE + get_local_id(0);
+	__global uchar * padcache = (__global uchar *)0;
+	uint buffer_xSIZE = 0;
+	
+#if NUM_PADBUFFERS == 1
+	padcache = padcache0;
+	buffer_xSIZE = THREADS_PER_BUFFER_0;
+#elif NUM_PADBUFFERS == 2
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	}
+#elif NUM_PADBUFFERS == 3
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache2;
+		buffer_xSIZE = THREADS_PER_BUFFER_2;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	}
+#endif
+
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
+	scrypt_ROMix(X, (__global uint4 *)padcache, relative_gid, buffer_xSIZE);
 
 	/* 3: Out = PBKDF2(password, X) */
 	scrypt_pbkdf2_32B_84(password, X, (uint4 *)output_hash);
@@ -1052,11 +1145,21 @@ __kernel void search84_part1(
 
 // Part 2: ROMix
 // Computes: X → X', loads X from temp_X, stores result to temp_X2
+// Supports multiple padbuffer8 buffers for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part2(
 	__global const uint4 * restrict temp_X,      // X from part1 (read-only)
 	__global uint4 * restrict temp_X2,           // X' after ROMix (write-only)
-	__global uchar * restrict padcache)
+#if NUM_PADBUFFERS >= 1
+	__global uchar * restrict padcache0
+#endif
+#if NUM_PADBUFFERS >= 2
+	, __global uchar * restrict padcache1
+#endif
+#if NUM_PADBUFFERS >= 3
+	, __global uchar * restrict padcache2
+#endif
+)
 {
 	uint4 X[8];
 	const uint gid = get_global_id(0);
@@ -1071,9 +1174,45 @@ __kernel void search84_part2(
 		X[i] = temp_X[offset + i];
 	}
 	
+	// Determine which padbuffer to use based on relative thread ID
+	// Calculate relative gid within the work batch first
+	// This works correctly with global_work_offset because get_group_id/get_local_id
+	// are relative to the work batch, not absolute
+	const uint group_id = get_group_id(0);
+	uint relative_gid = group_id * WORKSIZE + get_local_id(0);
+	__global uchar * padcache = (__global uchar *)0;
+	uint buffer_xSIZE = 0;
+	
+#if NUM_PADBUFFERS == 1
+	padcache = padcache0;
+	buffer_xSIZE = THREADS_PER_BUFFER_0;
+#elif NUM_PADBUFFERS == 2
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	}
+#elif NUM_PADBUFFERS == 3
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	} else {
+		padcache = padcache2;
+		buffer_xSIZE = THREADS_PER_BUFFER_2;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	}
+#endif
+	
 	// ROMix (the heavy computation)
 	/* 2: X = ROMix(X) */
-	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
+	scrypt_ROMix(X, (__global uint4 *)padcache, relative_gid, buffer_xSIZE);
 	
 	// Store updated X to separate buffer (avoids overwriting Part 1's output)
 	// This write to a new location may improve performance vs overwriting temp_X

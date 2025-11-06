@@ -1357,7 +1357,10 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 
 	CL_SET_ARG(clState->CLbuffer0);
 	CL_SET_ARG(clState->outputBuffer);
-	CL_SET_ARG(clState->padbuffer8);
+	// Pass all padbuffer8 buffers for monolithic kernel
+	for (size_t i = 0; i < clState->num_padbuffers; i++) {
+		CL_SET_ARG(clState->padbuffer8[i]);
+	}
 	CL_SET_ARG(le_target);
 
 	// If using the N Scrypt kernel, pass in NFactor
@@ -1951,11 +1954,14 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		clReleaseEvent(event_part1);
 		
 		// ===== PART 2: Launch, Wait, Profile =====
-		// Set arguments for Part 2: (temp_X input, temp_X2 output, padcache)
+		// Set arguments for Part 2: (temp_X input, temp_X2 output, padcache buffers)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X_buffer);
 		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X2_buffer);
-		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8);
+		// Pass all padbuffer8 buffers
+		for (size_t i = 0; i < clState->num_padbuffers; i++) {
+			status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8[i]);
+		}
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: clSetKernelArg Part 2 failed.", status);
 			return -1;
@@ -2233,11 +2239,15 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 		applog(LOG_DEBUG, "Released split kernel resources");
 	}
 	
-	// Release padbuffer8 (host memory is managed by OpenCL)
-	if (clState->padbuffer8) {
-		clReleaseMemObject(clState->padbuffer8);
-		clState->padbuffer8 = NULL;
-		applog(LOG_DEBUG, "Released padbuffer8 (host-allocated memory)");
+	// Release all padbuffer8 buffers
+	for (size_t i = 0; i < clState->num_padbuffers; i++) {
+		if (clState->padbuffer8[i]) {
+			clReleaseMemObject(clState->padbuffer8[i]);
+			clState->padbuffer8[i] = NULL;
+		}
+	}
+	if (clState->num_padbuffers > 0) {
+		applog(LOG_DEBUG, "Released %zu padbuffer8 buffer(s)", clState->num_padbuffers);
 	}
 	
 	// Release other scrypt buffers

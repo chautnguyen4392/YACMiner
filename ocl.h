@@ -9,6 +9,7 @@
 #include <OpenCL/opencl.h>
 #else
 #include <CL/cl.h>
+#include <CL/cl_ext.h>  // For AMD extensions like CL_DEVICE_GLOBAL_FREE_MEMORY_AMD
 #endif
 
 #include "miner.h"
@@ -21,8 +22,10 @@ typedef struct {
 	cl_mem outputBuffer;
 #ifdef USE_SCRYPT
 	cl_mem CLbuffer0;
-	cl_mem padbuffer8;  // Uses CL_MEM_ALLOC_HOST_PTR for host-allocated pinned memory
+	cl_mem padbuffer8[3];  // Multiple buffers (up to 3) for better memory utilization
 	size_t padbufsize;
+	size_t num_padbuffers;  // Number of padbuffer8 buffers (1-3)
+	size_t groups_per_buffer[3];  // Number of groups per buffer
 	void * cldata;
 	// Split kernel support
 	cl_kernel kernel_part1;
