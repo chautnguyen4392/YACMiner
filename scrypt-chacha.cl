@@ -911,7 +911,11 @@ scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restri
 
 __constant uint ES[2] = { 0x00FF00FF, 0xFF00FF00 };
 #define FOUND (0xFF)
-#define SETFOUND(Xnonce) output[output[FOUND]++] = Xnonce
+// Use atomic increment to safely handle multiple threads writing nonces
+#define SETFOUND(Xnonce) do { \
+	uint idx = atomic_inc(&output[FOUND]); \
+	output[idx] = Xnonce; \
+} while(0)
 #define EndianSwap(n) (rotate(n & Es2[0].x, 24U)|rotate(n & Es2[0].y, 8U))
 
 // Kernel for 80-byte block header
