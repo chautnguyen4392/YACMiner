@@ -1357,9 +1357,13 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 
 	CL_SET_ARG(clState->CLbuffer0);
 	CL_SET_ARG(clState->outputBuffer);
-	// Pass all padbuffer8 buffers for monolithic kernel
+	// Pass all padbuffer8 buffers (VRAM) for monolithic kernel
 	for (size_t i = 0; i < clState->num_padbuffers; i++) {
 		CL_SET_ARG(clState->padbuffer8[i]);
+	}
+	// Pass all padbuffer8_RAM buffers (system RAM) for monolithic kernel
+	for (size_t i = 0; i < clState->num_padbuffers_RAM; i++) {
+		CL_SET_ARG(clState->padbuffer8_RAM[i]);
 	}
 	CL_SET_ARG(le_target);
 
@@ -1958,9 +1962,13 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X_buffer);
 		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X2_buffer);
-		// Pass all padbuffer8 buffers
+		// Pass all padbuffer8 buffers (VRAM)
 		for (size_t i = 0; i < clState->num_padbuffers; i++) {
 			status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8[i]);
+		}
+		// Pass all padbuffer8_RAM buffers (system RAM)
+		for (size_t i = 0; i < clState->num_padbuffers_RAM; i++) {
+			status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8_RAM[i]);
 		}
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: clSetKernelArg Part 2 failed.", status);
@@ -2239,7 +2247,7 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 		applog(LOG_DEBUG, "Released split kernel resources");
 	}
 	
-	// Release all padbuffer8 buffers
+	// Release all padbuffer8 buffers (VRAM)
 	for (size_t i = 0; i < clState->num_padbuffers; i++) {
 		if (clState->padbuffer8[i]) {
 			clReleaseMemObject(clState->padbuffer8[i]);
@@ -2248,6 +2256,17 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 	}
 	if (clState->num_padbuffers > 0) {
 		applog(LOG_DEBUG, "Released %zu padbuffer8 buffer(s)", clState->num_padbuffers);
+	}
+	
+	// Release all padbuffer8_RAM buffers (system RAM)
+	for (size_t i = 0; i < clState->num_padbuffers_RAM; i++) {
+		if (clState->padbuffer8_RAM[i]) {
+			clReleaseMemObject(clState->padbuffer8_RAM[i]);
+			clState->padbuffer8_RAM[i] = NULL;
+		}
+	}
+	if (clState->num_padbuffers_RAM > 0) {
+		applog(LOG_DEBUG, "Released %zu padbuffer8_RAM buffer(s)", clState->num_padbuffers_RAM);
 	}
 	
 	// Release other scrypt buffers

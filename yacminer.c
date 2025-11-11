@@ -114,7 +114,7 @@ bool opt_scrypt=1;
 bool opt_scrypt_chacha=0;
 bool opt_scrypt_chacha_84=0;
 bool opt_scrypt_split_kernels=false;
-bool opt_padbuffer_host_memory=false;  // Use CL_MEM_ALLOC_HOST_PTR for padbuffer8
+bool opt_use_system_ram=false;  // Use system RAM for additional padbuffer8_RAM buffers
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
@@ -1397,9 +1397,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt-split-kernels",
 			opt_set_bool, &opt_scrypt_split_kernels,
 			"Use split kernels to reduce register pressure (for scrypt-chacha-84 only, reduces spills by ~35-46)"),
-	OPT_WITHOUT_ARG("--padbuffer-host-memory",
-			opt_set_bool, &opt_padbuffer_host_memory,
-			"Use CL_MEM_ALLOC_HOST_PTR for padbuffer8 (may not work on all OpenCL platforms)"),
+	OPT_WITHOUT_ARG("--use-system-ram",
+			opt_set_bool, &opt_use_system_ram,
+			"Use system RAM for additional padbuffer8_RAM buffers (distributed equally among GPUs)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),
