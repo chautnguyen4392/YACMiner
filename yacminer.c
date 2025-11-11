@@ -112,8 +112,8 @@ int gpu_threads;
 #ifdef USE_SCRYPT
 bool opt_scrypt=1;
 bool opt_scrypt_chacha=0;
-bool opt_scrypt_chacha_84=0;
-bool opt_scrypt_split_kernels=false;
+bool opt_scrypt_chacha_84=false;
+bool opt_scrypt_split_kernels=true;
 bool opt_use_system_ram=false;  // Use system RAM for additional padbuffer8_RAM buffers
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
@@ -1394,9 +1394,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt-chacha-84",
 			set_scrypt_chacha_84, NULL,
 			"Use the scrypt-chacha algorithm for mining with 84-byte block headers (8-byte timestamp)"),
-	OPT_WITHOUT_ARG("--scrypt-split-kernels",
-			opt_set_bool, &opt_scrypt_split_kernels,
-			"Use split kernels to reduce register pressure (for scrypt-chacha-84 only, reduces spills by ~35-46)"),
+	OPT_WITHOUT_ARG("--scrypt-monolithic-kernels",
+			opt_set_invbool, &opt_scrypt_split_kernels,
+			"Disable split kernels and use monolithic kernels instead (for scrypt-chacha-84 only)"),
 	OPT_WITHOUT_ARG("--use-system-ram",
 			opt_set_bool, &opt_use_system_ram,
 			"Use system RAM for additional padbuffer8_RAM buffers (distributed equally among GPUs)"),
