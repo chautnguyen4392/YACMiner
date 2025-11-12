@@ -74,6 +74,27 @@ char *file_contents(const char *filename, int *length)
 	return (char*)buffer;
 }
 
+// Count number of enabled OpenCL GPU devices
+// This considers the --device option, counting only devices that are actually enabled
+static int count_enabled_opencl_devices(void) {
+	int count = 0;
+	int i;
+	
+	if (!devices || total_devices <= 0)
+		return 0;
+	
+	for (i = 0; i < total_devices; i++) {
+		if (devices[i] && 
+		    devices[i]->drv && 
+		    devices[i]->drv->drv_id == DRIVER_OPENCL &&
+		    devices[i]->deven == DEV_ENABLED) {
+			count++;
+		}
+	}
+	
+	return count;
+}
+
 // Calculate available system RAM per GPU
 // Returns available RAM in bytes per GPU (distributed equally among all GPUs)
 // Reads from /proc/meminfo first, falls back to sysinfo if unavailable
@@ -133,16 +154,21 @@ static cl_ulong get_available_system_ram_per_gpu(void) {
 		}
 	}
 	
-	// Count number of GPUs
-	int num_gpus = clDevicesNum();
+	// Count number of enabled OpenCL GPU devices (considers --device option)
+	int num_gpus = count_enabled_opencl_devices();
 	if (num_gpus <= 0) {
-		applog(LOG_ERR, "No GPUs detected, cannot distribute system RAM");
-		return 0;
+		// Fallback to clDevicesNum() if device list not yet initialized
+		num_gpus = clDevicesNum();
+		if (num_gpus <= 0) {
+			applog(LOG_ERR, "No GPUs detected, cannot distribute system RAM");
+			return 0;
+		}
+		applog(LOG_DEBUG, "Device list not yet initialized, using clDevicesNum() count: %d", num_gpus);
 	}
 	
-	// Distribute available RAM equally among all GPUs
+	// Distribute available RAM equally among all enabled GPUs
 	cl_ulong ram_per_gpu = mem_available / num_gpus;
-	applog(LOG_INFO, "Distributing system RAM: %lu MB per GPU (%d GPU(s) total)",
+	applog(LOG_INFO, "Distributing system RAM: %lu MB per GPU (%d enabled OpenCL GPU(s) total)",
 	       (unsigned long)(ram_per_gpu / (1024 * 1024)), num_gpus);
 	
 	return ram_per_gpu;
