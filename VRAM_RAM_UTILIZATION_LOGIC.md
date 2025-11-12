@@ -53,7 +53,7 @@ This document consolidates the design and implementation notes for distributing 
 - Abort and log an error if either check fails.
 
 ## Kernel Integration
-- All kernels accept the selected buffers: VRAM buffers first, system RAM buffers second.
+- All kernels accept the selected buffers: system RAM buffers first (prioritized), VRAM buffers second.
 - Preprocessor defines communicate counts and sizes:
   - `NUM_PADBUFFERS`, `THREADS_PER_BUFFER_0/1/2`
   - `NUM_PADBUFFERS_RAM`, `THREADS_PER_BUFFER_RAM_0/1`

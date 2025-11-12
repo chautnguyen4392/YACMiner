@@ -1044,65 +1044,64 @@ __global uchar * restrict padcache0
 	__global uchar * padcache = (__global uchar *)0;
 	uint buffer_xSIZE = 0;
 	
-	// Calculate total threads in VRAM buffers
-	uint total_vram_threads = 0;
-#if NUM_PADBUFFERS == 1
-	total_vram_threads = THREADS_PER_BUFFER_0;
-#elif NUM_PADBUFFERS == 2
-	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1;
-#elif NUM_PADBUFFERS == 3
-	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2;
-#endif
-	
-	// First check VRAM buffers
-#if NUM_PADBUFFERS == 1
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	}
-#elif NUM_PADBUFFERS == 2
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
-		padcache = padcache1;
-		buffer_xSIZE = THREADS_PER_BUFFER_1;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	}
-#elif NUM_PADBUFFERS == 3
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
-		padcache = padcache1;
-		buffer_xSIZE = THREADS_PER_BUFFER_1;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
-		padcache = padcache2;
-		buffer_xSIZE = THREADS_PER_BUFFER_2;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
-	}
-#endif
-	
-	// If not in VRAM buffers, check system RAM buffers
-#if NUM_PADBUFFERS_RAM >= 1
-	if (padcache == (__global uchar *)0 && relative_gid >= total_vram_threads) {
-		uint ram_relative_gid = relative_gid - total_vram_threads;
+	// Calculate total threads in system RAM buffers (prioritized first)
+	uint total_ram_threads = 0;
 #if NUM_PADBUFFERS_RAM == 1
-		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
-			padcache = padcache_ram0;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
-			relative_gid = ram_relative_gid;
-		}
+	total_ram_threads = THREADS_PER_BUFFER_RAM_0;
 #elif NUM_PADBUFFERS_RAM == 2
-		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
-			padcache = padcache_ram0;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
-			relative_gid = ram_relative_gid;
-		} else if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
-			padcache = padcache_ram1;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
-			relative_gid = ram_relative_gid - THREADS_PER_BUFFER_RAM_0;
+	total_ram_threads = THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1;
+#endif
+	
+	// First check system RAM buffers (prioritized)
+#if NUM_PADBUFFERS_RAM == 1
+	if (relative_gid < THREADS_PER_BUFFER_RAM_0) {
+		padcache = padcache_ram0;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+	}
+#elif NUM_PADBUFFERS_RAM == 2
+	if (relative_gid < THREADS_PER_BUFFER_RAM_0) {
+		padcache = padcache_ram0;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
+		padcache = padcache_ram1;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_RAM_0;
+	}
+#endif
+	
+	// If not in system RAM buffers, check VRAM buffers
+#if NUM_PADBUFFERS >= 1
+	if (padcache == (__global uchar *)0 && relative_gid >= total_ram_threads) {
+		uint vram_relative_gid = relative_gid - total_ram_threads;
+#if NUM_PADBUFFERS == 1
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		}
+#elif NUM_PADBUFFERS == 2
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		}
+#elif NUM_PADBUFFERS == 3
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
 		}
 #endif
 	}
@@ -1236,65 +1235,64 @@ __kernel void search84_part2(
 	__global uchar * padcache = (__global uchar *)0;
 	uint buffer_xSIZE = 0;
 	
-	// Calculate total threads in VRAM buffers
-	uint total_vram_threads = 0;
-#if NUM_PADBUFFERS == 1
-	total_vram_threads = THREADS_PER_BUFFER_0;
-#elif NUM_PADBUFFERS == 2
-	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1;
-#elif NUM_PADBUFFERS == 3
-	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2;
-#endif
-	
-	// First check VRAM buffers
-#if NUM_PADBUFFERS == 1
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	}
-#elif NUM_PADBUFFERS == 2
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
-		padcache = padcache1;
-		buffer_xSIZE = THREADS_PER_BUFFER_1;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	}
-#elif NUM_PADBUFFERS == 3
-	if (relative_gid < THREADS_PER_BUFFER_0) {
-		padcache = padcache0;
-		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
-		padcache = padcache1;
-		buffer_xSIZE = THREADS_PER_BUFFER_1;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
-		padcache = padcache2;
-		buffer_xSIZE = THREADS_PER_BUFFER_2;
-		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
-	}
-#endif
-	
-	// If not in VRAM buffers, check system RAM buffers
-#if NUM_PADBUFFERS_RAM >= 1
-	if (padcache == (__global uchar *)0 && relative_gid >= total_vram_threads) {
-		uint ram_relative_gid = relative_gid - total_vram_threads;
+	// Calculate total threads in system RAM buffers (prioritized first)
+	uint total_ram_threads = 0;
 #if NUM_PADBUFFERS_RAM == 1
-		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
-			padcache = padcache_ram0;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
-			relative_gid = ram_relative_gid;
-		}
+	total_ram_threads = THREADS_PER_BUFFER_RAM_0;
 #elif NUM_PADBUFFERS_RAM == 2
-		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
-			padcache = padcache_ram0;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
-			relative_gid = ram_relative_gid;
-		} else if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
-			padcache = padcache_ram1;
-			buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
-			relative_gid = ram_relative_gid - THREADS_PER_BUFFER_RAM_0;
+	total_ram_threads = THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1;
+#endif
+	
+	// First check system RAM buffers (prioritized)
+#if NUM_PADBUFFERS_RAM == 1
+	if (relative_gid < THREADS_PER_BUFFER_RAM_0) {
+		padcache = padcache_ram0;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+	}
+#elif NUM_PADBUFFERS_RAM == 2
+	if (relative_gid < THREADS_PER_BUFFER_RAM_0) {
+		padcache = padcache_ram0;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
+		padcache = padcache_ram1;
+		buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_RAM_0;
+	}
+#endif
+	
+	// If not in system RAM buffers, check VRAM buffers
+#if NUM_PADBUFFERS >= 1
+	if (padcache == (__global uchar *)0 && relative_gid >= total_ram_threads) {
+		uint vram_relative_gid = relative_gid - total_ram_threads;
+#if NUM_PADBUFFERS == 1
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		}
+#elif NUM_PADBUFFERS == 2
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		}
+#elif NUM_PADBUFFERS == 3
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
 		}
 #endif
 	}
