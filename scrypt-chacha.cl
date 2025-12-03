@@ -937,6 +937,12 @@ __global uchar * restrict padcache0
 #if NUM_PADBUFFERS >= 3
 , __global uchar * restrict padcache2
 #endif
+#if NUM_PADBUFFERS >= 4
+, __global uchar * restrict padcache3
+#endif
+#if NUM_PADBUFFERS >= 5
+, __global uchar * restrict padcache4
+#endif
 , const uint target)
 {
 	uint4 password[5];
@@ -988,6 +994,44 @@ __global uchar * restrict padcache0
 		buffer_xSIZE = THREADS_PER_BUFFER_2;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
 	}
+#elif NUM_PADBUFFERS == 4
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+		padcache = padcache2;
+		buffer_xSIZE = THREADS_PER_BUFFER_2;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	} else {
+		padcache = padcache3;
+		buffer_xSIZE = THREADS_PER_BUFFER_3;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+	}
+#elif NUM_PADBUFFERS == 5
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+		padcache = padcache1;
+		buffer_xSIZE = THREADS_PER_BUFFER_1;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+		padcache = padcache2;
+		buffer_xSIZE = THREADS_PER_BUFFER_2;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3) {
+		padcache = padcache3;
+		buffer_xSIZE = THREADS_PER_BUFFER_3;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+	} else {
+		padcache = padcache4;
+		buffer_xSIZE = THREADS_PER_BUFFER_4;
+		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2 - THREADS_PER_BUFFER_3;
+	}
 #endif
 
 	/* 2: X = ROMix(X) */
@@ -1014,6 +1058,12 @@ __global uchar * restrict padcache0
 #endif
 #if NUM_PADBUFFERS >= 3
 , __global uchar * restrict padcache2
+#endif
+#if NUM_PADBUFFERS >= 4
+, __global uchar * restrict padcache3
+#endif
+#if NUM_PADBUFFERS >= 5
+, __global uchar * restrict padcache4
 #endif
 #if NUM_PADBUFFERS_RAM >= 1
 	, __global uchar * restrict padcache_ram0
@@ -1107,6 +1157,46 @@ __global uchar * restrict padcache0
 			padcache = padcache2;
 			buffer_xSIZE = THREADS_PER_BUFFER_2;
 			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		}
+#elif NUM_PADBUFFERS == 4
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3) {
+			padcache = padcache3;
+			buffer_xSIZE = THREADS_PER_BUFFER_3;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+		}
+#elif NUM_PADBUFFERS == 5
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3) {
+			padcache = padcache3;
+			buffer_xSIZE = THREADS_PER_BUFFER_3;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3 + THREADS_PER_BUFFER_4) {
+			padcache = padcache4;
+			buffer_xSIZE = THREADS_PER_BUFFER_4;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2 - THREADS_PER_BUFFER_3;
 		}
 #endif
 	}
@@ -1210,6 +1300,12 @@ __kernel void search84_part2(
 #if NUM_PADBUFFERS >= 3
 	, __global uchar * restrict padcache2
 #endif
+#if NUM_PADBUFFERS >= 4
+	, __global uchar * restrict padcache3
+#endif
+#if NUM_PADBUFFERS >= 5
+	, __global uchar * restrict padcache4
+#endif
 #if NUM_PADBUFFERS_RAM >= 1
 	, __global uchar * restrict padcache_ram0
 #endif
@@ -1298,6 +1394,46 @@ __kernel void search84_part2(
 			padcache = padcache2;
 			buffer_xSIZE = THREADS_PER_BUFFER_2;
 			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		}
+#elif NUM_PADBUFFERS == 4
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3) {
+			padcache = padcache3;
+			buffer_xSIZE = THREADS_PER_BUFFER_3;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+		}
+#elif NUM_PADBUFFERS == 5
+		if (vram_relative_gid < THREADS_PER_BUFFER_0) {
+			padcache = padcache0;
+			buffer_xSIZE = THREADS_PER_BUFFER_0;
+			relative_gid = vram_relative_gid;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
+			padcache = padcache1;
+			buffer_xSIZE = THREADS_PER_BUFFER_1;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
+			padcache = padcache2;
+			buffer_xSIZE = THREADS_PER_BUFFER_2;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3) {
+			padcache = padcache3;
+			buffer_xSIZE = THREADS_PER_BUFFER_3;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2;
+		} else if (vram_relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2 + THREADS_PER_BUFFER_3 + THREADS_PER_BUFFER_4) {
+			padcache = padcache4;
+			buffer_xSIZE = THREADS_PER_BUFFER_4;
+			relative_gid = vram_relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1 - THREADS_PER_BUFFER_2 - THREADS_PER_BUFFER_3;
 		}
 #endif
 	}
