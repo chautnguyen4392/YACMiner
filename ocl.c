@@ -184,7 +184,7 @@ static bool configure_vram_padbuffers(struct cgpu_info *cgpu,
 				      cl_ulong *total_padbuffer_mem_out)
 {
 	size_t optimal_groups_per_buffer_vram[5] = {0, 0, 0, 0, 0};
-	size_t optimal_num_buffers_vram = 1;
+	size_t optimal_num_buffers_vram = 0;
 	cl_ulong total_padbuffer_mem = 0;
 	size_t max_groups_per_buffer = cgpu->max_alloc / each_group_size;
 	applog(LOG_INFO, "GPU %d: max_groups_per_buffer: %zu, cgpu->max_alloc: %lu, each_group_size: %zu",
@@ -901,7 +901,14 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			temp_X2_size = temp_X_size;
 		}
 		const size_t other_buffers_size = CLbuffer0_size + outputBuffer_size + temp_X_size + temp_X2_size;
-		const cl_ulong remaining_vram = cgpu->global_mem_size - other_buffers_size;
+		cl_ulong remaining_vram;
+		if (opt_reserve_vram > 0) {
+			const cl_ulong reserve_bytes = (cl_ulong)opt_reserve_vram * 1024ULL * 1024ULL;
+			remaining_vram = (cgpu->global_mem_size > reserve_bytes) ? (cgpu->global_mem_size - reserve_bytes) : 0;
+			applog(LOG_INFO, "GPU %d: Reserving %d MB VRAM, remaining VRAM: %lu bytes", gpu, opt_reserve_vram, (unsigned long)remaining_vram);
+		} else {
+			remaining_vram = cgpu->global_mem_size - other_buffers_size;
+		}
 		const bool use_multiple_buffers = (remaining_vram > cgpu->max_alloc);
 
 		// Calculate available system RAM per GPU if use-system-ram is enabled

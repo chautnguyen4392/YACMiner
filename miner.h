@@ -1004,6 +1004,7 @@ extern bool opt_scrypt_chacha_84;
 extern bool opt_scrypt_split_kernels;
 extern bool opt_use_system_ram;  // Use system RAM for additional padbuffer8_RAM buffers
 extern bool opt_limit_ram_buffer;  // Limit RAM buffer size to max_alloc
+extern int opt_reserve_vram;  // Reserve VRAM in MB (0 = disabled)
 extern int opt_fixed_nfactor;
 extern bool opt_n_scrypt;
 #else

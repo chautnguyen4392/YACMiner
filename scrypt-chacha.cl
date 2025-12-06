@@ -927,9 +927,9 @@ __constant uint ES[2] = { 0x00FF00FF, 0xFF00FF00 };
 // Supports multiple padbuffer8 buffers for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search(__global const uint4 * restrict input,
-volatile __global uint * restrict output,
+volatile __global uint * restrict output
 #if NUM_PADBUFFERS >= 1
-__global uchar * restrict padcache0
+, __global uchar * restrict padcache0
 #endif
 #if NUM_PADBUFFERS >= 2
 , __global uchar * restrict padcache1
@@ -1049,9 +1049,9 @@ __global uchar * restrict padcache0
 // Supports multiple padbuffer8 buffers (VRAM) and padbuffer8_RAM buffers (system RAM) for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84(__global const uint4 * restrict input,
-volatile __global uint * restrict output,
+volatile __global uint * restrict output
 #if NUM_PADBUFFERS >= 1
-__global uchar * restrict padcache0
+, __global uchar * restrict padcache0
 #endif
 #if NUM_PADBUFFERS >= 2
 , __global uchar * restrict padcache1
@@ -1290,9 +1290,9 @@ __kernel void search84_part1(
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part2(
 	__global const uint4 * restrict temp_X,      // X from part1 (read-only)
-	__global uint4 * restrict temp_X2,           // X' after ROMix (write-only)
+	__global uint4 * restrict temp_X2            // X' after ROMix (write-only)
 #if NUM_PADBUFFERS >= 1
-	__global uchar * restrict padcache0
+	, __global uchar * restrict padcache0
 #endif
 #if NUM_PADBUFFERS >= 2
 	, __global uchar * restrict padcache1
