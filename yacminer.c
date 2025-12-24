@@ -110,9 +110,9 @@ int opt_dynamic_interval = 7;
 int opt_g_threads = -1;
 int gpu_threads;
 #ifdef USE_SCRYPT
-bool opt_scrypt=1;
-bool opt_scrypt_chacha=0;
-bool opt_scrypt_chacha_84=false;
+bool opt_scrypt=true;
+bool opt_scrypt_chacha=true;
+bool opt_scrypt_chacha_84=true;
 bool opt_scrypt_split_kernels=true;
 bool opt_use_system_ram=false;  // Use system RAM for additional padbuffer8_RAM buffers
 bool opt_limit_ram_buffer=false;  // Limit RAM buffer size to max_alloc
