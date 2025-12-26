@@ -29,6 +29,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/sysinfo.h>
 
 #include "findnonce.h"
 #include "ocl.h"
@@ -71,6 +72,80 @@ char *file_contents(const char *filename, int *length)
 	((char*)buffer)[*length] = '\0';
 
 	return (char*)buffer;
+}
+
+// Calculate available system RAM per GPU
+// Returns available RAM in bytes per GPU (distributed equally among all GPUs)
+// Reads from /proc/meminfo first, falls back to sysinfo if unavailable
+static cl_ulong get_available_system_ram_per_gpu(void) {
+	cl_ulong mem_available = 0;
+	cl_ulong mem_total = 0;
+	cl_ulong mem_free = 0;
+	FILE *f;
+	char line[256];
+	
+	// Try reading from /proc/meminfo first
+	f = fopen("/proc/meminfo", "r");
+	if (f) {
+		while (fgets(line, sizeof(line), f)) {
+			if (sscanf(line, "MemTotal: %lu kB", &mem_total) == 1) {
+				// Convert from KB to bytes
+				mem_total *= 1024;
+			} else if (sscanf(line, "MemFree: %lu kB", &mem_free) == 1) {
+				// Convert from KB to bytes
+				mem_free *= 1024;
+			} else if (sscanf(line, "MemAvailable: %lu kB", &mem_available) == 1) {
+				// Convert from KB to bytes
+				mem_available *= 1024;
+			}
+		}
+		fclose(f);
+		
+		if (mem_available > 0) {
+			applog(LOG_INFO, "System RAM: MemTotal=%lu MB, MemFree=%lu MB, MemAvailable=%lu MB",
+			       (unsigned long)(mem_total / (1024 * 1024)),
+			       (unsigned long)(mem_free / (1024 * 1024)),
+			       (unsigned long)(mem_available / (1024 * 1024)));
+		} else {
+			// Fallback: use MemFree if MemAvailable not found
+			mem_available = mem_free;
+			applog(LOG_INFO, "System RAM: MemTotal=%lu MB, MemFree=%lu MB (MemAvailable not found, using MemFree)",
+			       (unsigned long)(mem_total / (1024 * 1024)),
+			       (unsigned long)(mem_free / (1024 * 1024)));
+		}
+	}
+	
+	// Fallback to sysinfo if /proc/meminfo failed or MemAvailable not found
+	if (mem_available == 0) {
+		struct sysinfo si;
+		if (sysinfo(&si) == 0) {
+			// freeram + bufferram gives available memory
+			mem_available = (cl_ulong)si.freeram * si.mem_unit + (cl_ulong)si.bufferram * si.mem_unit;
+			mem_total = (cl_ulong)si.totalram * si.mem_unit;
+			mem_free = (cl_ulong)si.freeram * si.mem_unit;
+			applog(LOG_INFO, "System RAM (from sysinfo): MemTotal=%lu MB, MemFree=%lu MB, Available=%lu MB",
+			       (unsigned long)(mem_total / (1024 * 1024)),
+			       (unsigned long)(mem_free / (1024 * 1024)),
+			       (unsigned long)(mem_available / (1024 * 1024)));
+		} else {
+			applog(LOG_ERR, "Failed to get system memory information");
+			return 0;
+		}
+	}
+	
+	// Count number of GPUs
+	int num_gpus = clDevicesNum();
+	if (num_gpus <= 0) {
+		applog(LOG_ERR, "No GPUs detected, cannot distribute system RAM");
+		return 0;
+	}
+	
+	// Distribute available RAM equally among all GPUs
+	cl_ulong ram_per_gpu = mem_available / num_gpus;
+	applog(LOG_INFO, "Distributing system RAM: %lu MB per GPU (%d GPU(s) total)",
+	       (unsigned long)(ram_per_gpu / (1024 * 1024)), num_gpus);
+	
+	return ram_per_gpu;
 }
 
 int clDevicesNum(void) {
@@ -568,7 +643,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			bsize = 2048;
 		else
 			bsize = 1024;
-		size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
+		const size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
 
 		// if we do not have TC and we do not have BS, then calculate some conservative numbers
 		if ((!cgpu->opt_tc) && (!cgpu->buffer_size)) {
@@ -603,85 +678,111 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			clState->groups_per_buffer[i] = 0;
 		}
 
-		size_t each_item_size = 128 * ipt;
-		size_t each_group_size = each_item_size * clState->wsize;
-		size_t number_groups = cgpu->thread_concurrency / clState->wsize;
+		const size_t each_item_size = 128 * ipt;
+		const size_t each_group_size = each_item_size * clState->wsize;
+		const size_t number_groups = cgpu->thread_concurrency / clState->wsize;
+		const cl_ulong total_groups_size = (cl_ulong)number_groups * each_group_size;
 
 		// Calculate remaining memory after other buffers (conservative estimate)
-		size_t CLbuffer0_size = 128;
-		size_t outputBuffer_size = SCRYPT_BUFFERSIZE;
+		const size_t CLbuffer0_size = 128;
+		const size_t outputBuffer_size = SCRYPT_BUFFERSIZE;
 		// Estimate temp buffers (will be created later if split kernels enabled)
-		size_t temp_X_size = cgpu->thread_concurrency * 8 * sizeof(cl_uint4);
+		size_t temp_X_size = 0;
 		size_t temp_X2_size = temp_X_size;
-		size_t other_buffers_size = CLbuffer0_size + outputBuffer_size + temp_X_size + temp_X2_size;
-		
-		cl_ulong remaining_mem_size = 0;
+		if (clState->use_split_kernels) {
+			temp_X_size = cgpu->thread_concurrency * 8 * sizeof(cl_uint4);
+			temp_X2_size = temp_X_size;
+		}
+		const size_t other_buffers_size = CLbuffer0_size + outputBuffer_size + temp_X_size + temp_X2_size;
+		cl_ulong remaining_vram = 0;
 		bool use_multiple_buffers = false;
 		
 		if (cgpu->max_alloc < cgpu->global_mem_size) {
-			if (cgpu->global_mem_size > other_buffers_size) {
-				remaining_mem_size = cgpu->global_mem_size - other_buffers_size;
-				if (remaining_mem_size > cgpu->max_alloc) {
-					use_multiple_buffers = true;
-				}
+			remaining_vram = cgpu->global_mem_size - other_buffers_size;
+			if (remaining_vram > cgpu->max_alloc) {
+				use_multiple_buffers = true;
 			}
 		}
 
-		// Ensure total size for all groups fits within remaining_mem_size to prevent memory overlap
-		cl_ulong total_groups_size = (cl_ulong)number_groups * each_group_size;
-		if (remaining_mem_size > 0 && total_groups_size > remaining_mem_size) {
-			applog(LOG_ERR, "GPU %d: Total groups size (%lu bytes) exceeds remaining memory (%lu bytes). "
+		// Calculate available system RAM per GPU if use-system-ram is enabled
+		cl_ulong available_system_ram = 0;
+		if (opt_use_system_ram) {
+			available_system_ram = get_available_system_ram_per_gpu();
+			if (available_system_ram == 0) {
+				applog(LOG_ERR, "GPU %d: Failed to get available system RAM, disabling system RAM buffers", gpu);
+				opt_use_system_ram = false;
+			}
+		}
+
+		// Ensure total size for all groups fits within available memory (VRAM + system RAM if enabled) to prevent memory overlap
+		cl_ulong total_available_mem = remaining_vram;
+		if (opt_use_system_ram) {
+			total_available_mem += available_system_ram;
+		}
+		
+		if (total_available_mem > 0 && total_groups_size > total_available_mem) {
+			applog(LOG_ERR, "GPU %d: Total groups size (%lu bytes) exceeds available memory (%lu bytes). "
 			       "This would cause memory overlap. Please reduce thread_concurrency or lookup_gap.", 
-			       gpu, (long unsigned int)total_groups_size, (long unsigned int)remaining_mem_size);
+			       gpu, (long unsigned int)total_groups_size, (long unsigned int)total_available_mem);
 			applog(LOG_ERR, "GPU %d: Required: %zu groups * %zu bytes/group = %lu bytes", 
 			       gpu, number_groups, each_group_size, (long unsigned int)total_groups_size);
-			applog(LOG_ERR, "GPU %d: Available: %lu bytes (global_mem: %lu, other_buffers: %zu)", 
-			       gpu, (long unsigned int)remaining_mem_size, 
-			       (long unsigned int)cgpu->global_mem_size, other_buffers_size);
+			applog(LOG_ERR, "GPU %d: Available: %lu bytes VRAM (global_mem: %lu, other_buffers: %zu) + %lu bytes system RAM = %lu bytes total",
+			       gpu,
+			       (long unsigned int)remaining_vram,
+			       (long unsigned int)cgpu->global_mem_size,
+			       (unsigned long)other_buffers_size,
+			       (long unsigned int)available_system_ram,
+			       (long unsigned int)total_available_mem);
 			return NULL;
 		}
 
-		size_t buffer_size = 0;
-		size_t optimal_num_buffers = 1;
-		size_t optimal_groups_per_buffer[3] = {0, 0, 0};
-		cl_ulong best_utilization = 0;  // Track best memory utilization
+		const size_t max_groups_for_vram = remaining_vram / each_group_size;
+		size_t num_groups_for_vram = number_groups;
+		if (num_groups_for_vram > max_groups_for_vram)
+			num_groups_for_vram = max_groups_for_vram;
 
-		if (use_multiple_buffers && number_groups > 0) {
+		size_t buffer_size = 0;
+		size_t optimal_num_buffers_vram = 1;
+		size_t optimal_groups_per_buffer_vram[3] = {0, 0, 0};
+		cl_ulong best_utilization = 0;  // Track best memory utilization
+		cl_ulong total_padbuffer_mem = 0;
+
+		if (use_multiple_buffers && num_groups_for_vram > 0) {
 			// Try configurations starting from 1 buffer, find smallest number that maximizes utilization
 			// Target: use at least 99% of remaining memory
-			cl_ulong target_utilization = remaining_mem_size * 99 / 100;
+			cl_ulong target_utilization = remaining_vram * 99 / 100;
 			
 			// Try 1 buffer first
-			size_t single_buffer_size = each_group_size * number_groups;
+			size_t single_buffer_size = each_group_size * num_groups_for_vram;
 			if (single_buffer_size > cgpu->max_alloc) {
 				single_buffer_size = cgpu->max_alloc;
 			}
 			cl_ulong single_buffer_utilization = single_buffer_size;
 			if (single_buffer_size <= cgpu->max_alloc && single_buffer_utilization >= target_utilization) {
-				optimal_num_buffers = 1;
+				optimal_num_buffers_vram = 1;
 				buffer_size = single_buffer_size;
-				optimal_groups_per_buffer[0] = buffer_size / each_group_size;
+				optimal_groups_per_buffer_vram[0] = buffer_size / each_group_size;
 				best_utilization = single_buffer_utilization;
-				goto found_optimal_config;
+				goto found_optimal_vram_config;
 			}
 			// Track best so far even if below target
 			if (single_buffer_utilization > best_utilization) {
-				optimal_num_buffers = 1;
+				optimal_num_buffers_vram = 1;
 				buffer_size = single_buffer_size;
-				optimal_groups_per_buffer[0] = buffer_size / each_group_size;
+				optimal_groups_per_buffer_vram[0] = buffer_size / each_group_size;
 				best_utilization = single_buffer_utilization;
 			}
 			
 			// Try 2 buffers
 			size_t best_2buf_config[2] = {0, 0};
 			cl_ulong best_2buf_utilization = 0;
-			for (size_t groups_buf1 = number_groups / 2; groups_buf1 > 0; groups_buf1--) {
-				size_t groups_buf2 = number_groups - groups_buf1;
+			for (size_t groups_buf1 = num_groups_for_vram / 2; groups_buf1 > 0; groups_buf1--) {
+				size_t groups_buf2 = num_groups_for_vram - groups_buf1;
 				size_t buf1_size = each_group_size * groups_buf1;
 				size_t buf2_size = each_group_size * groups_buf2;
 				if (buf1_size <= cgpu->max_alloc && buf2_size <= cgpu->max_alloc) {
 					cl_ulong total_size = buf1_size + buf2_size;
-					if (total_size <= remaining_mem_size && total_size > best_2buf_utilization) {
+					if (total_size <= remaining_vram && total_size > best_2buf_utilization) {
 						best_2buf_config[0] = groups_buf1;
 						best_2buf_config[1] = groups_buf2;
 						best_2buf_utilization = total_size;
@@ -689,15 +790,15 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 				}
 			}
 			if (best_2buf_utilization > best_utilization) {
-				optimal_num_buffers = 2;
-				optimal_groups_per_buffer[0] = best_2buf_config[0];
-				optimal_groups_per_buffer[1] = best_2buf_config[1];
+				optimal_num_buffers_vram = 2;
+				optimal_groups_per_buffer_vram[0] = best_2buf_config[0];
+				optimal_groups_per_buffer_vram[1] = best_2buf_config[1];
 				buffer_size = (each_group_size * best_2buf_config[0] > each_group_size * best_2buf_config[1]) ?
 				              (each_group_size * best_2buf_config[0]) : (each_group_size * best_2buf_config[1]);
 				best_utilization = best_2buf_utilization;
 				// If this meets target, use it (smallest number that works)
 				if (best_2buf_utilization >= target_utilization) {
-					goto found_optimal_config;
+					goto found_optimal_vram_config;
 				}
 			}
 			
@@ -705,9 +806,9 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			if (best_utilization < target_utilization) {
 				size_t best_3buf_config[3] = {0, 0, 0};
 				cl_ulong best_3buf_utilization = 0;
-				for (size_t groups_buf1 = number_groups / 3; groups_buf1 > 0; groups_buf1--) {
-					for (size_t groups_buf2 = (number_groups - groups_buf1) / 2; groups_buf2 > 0; groups_buf2--) {
-						size_t groups_buf3 = number_groups - groups_buf1 - groups_buf2;
+				for (size_t groups_buf1 = num_groups_for_vram / 3; groups_buf1 > 0; groups_buf1--) {
+					for (size_t groups_buf2 = (num_groups_for_vram - groups_buf1) / 2; groups_buf2 > 0; groups_buf2--) {
+						size_t groups_buf3 = num_groups_for_vram - groups_buf1 - groups_buf2;
 						size_t buf1_size = each_group_size * groups_buf1;
 						size_t buf2_size = each_group_size * groups_buf2;
 						size_t buf3_size = each_group_size * groups_buf3;
@@ -716,7 +817,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 							((buf2_size > buf3_size) ? buf2_size : buf3_size);
 						if (max_buf_size <= cgpu->max_alloc) {
 							cl_ulong total_size = buf1_size + buf2_size + buf3_size;
-							if (total_size <= remaining_mem_size && total_size > best_3buf_utilization) {
+							if (total_size <= remaining_vram && total_size > best_3buf_utilization) {
 								best_3buf_config[0] = groups_buf1;
 								best_3buf_config[1] = groups_buf2;
 								best_3buf_config[2] = groups_buf3;
@@ -726,10 +827,10 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 					}
 				}
 				if (best_3buf_utilization > best_utilization) {
-					optimal_num_buffers = 3;
-					optimal_groups_per_buffer[0] = best_3buf_config[0];
-					optimal_groups_per_buffer[1] = best_3buf_config[1];
-					optimal_groups_per_buffer[2] = best_3buf_config[2];
+					optimal_num_buffers_vram = 3;
+					optimal_groups_per_buffer_vram[0] = best_3buf_config[0];
+					optimal_groups_per_buffer_vram[1] = best_3buf_config[1];
+					optimal_groups_per_buffer_vram[2] = best_3buf_config[2];
 					size_t buf1_size = each_group_size * best_3buf_config[0];
 					size_t buf2_size = each_group_size * best_3buf_config[1];
 					size_t buf3_size = each_group_size * best_3buf_config[2];
@@ -741,33 +842,32 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			}
 		} else {
 			// Fallback to single buffer if multiple buffers not applicable
-			buffer_size = each_group_size * number_groups;
+			buffer_size = each_group_size * num_groups_for_vram;
 			if (buffer_size > cgpu->max_alloc) {
 				buffer_size = cgpu->max_alloc;
-				// Recalculate number_groups based on max_alloc
-				number_groups = buffer_size / each_group_size;
+				// Recalculate num_groups_for_vram based on max_alloc
+				num_groups_for_vram = buffer_size / each_group_size;
 			}
-			optimal_groups_per_buffer[0] = number_groups;
+			optimal_groups_per_buffer_vram[0] = num_groups_for_vram;
 		}
 		
-found_optimal_config:
-		clState->num_padbuffers = optimal_num_buffers;
-		for (int i = 0; i < optimal_num_buffers; i++) {
-			clState->groups_per_buffer[i] = optimal_groups_per_buffer[i];
+found_optimal_vram_config:
+		clState->num_padbuffers = optimal_num_buffers_vram;
+		for (int i = 0; i < optimal_num_buffers_vram; i++) {
+			clState->groups_per_buffer[i] = optimal_groups_per_buffer_vram[i];
 		}
 		clState->padbufsize = buffer_size;
 
 		// Calculate total memory used by padbuffer8 buffers
-		cl_ulong total_padbuffer_mem = 0;
-		for (int i = 0; i < optimal_num_buffers; i++) {
-			total_padbuffer_mem += each_group_size * optimal_groups_per_buffer[i];
+		for (int i = 0; i < optimal_num_buffers_vram; i++) {
+			total_padbuffer_mem += each_group_size * optimal_groups_per_buffer_vram[i];
 		}
 		
 		// Calculate remaining unused memory
 		cl_ulong unused_mem = 0;
-		if (use_multiple_buffers && remaining_mem_size > 0) {
-			if (total_padbuffer_mem < remaining_mem_size) {
-				unused_mem = remaining_mem_size - total_padbuffer_mem;
+		if (use_multiple_buffers && remaining_vram > 0) {
+			if (total_padbuffer_mem < remaining_vram) {
+				unused_mem = remaining_vram - total_padbuffer_mem;
 			}
 		}
 
@@ -779,10 +879,126 @@ found_optimal_config:
 			applog(LOG_INFO, "GPU %d: padbuffer8 buffers use %lu MB, %lu MB remaining unused (%.1f%% utilization)",
 			       gpu, (unsigned long)(total_padbuffer_mem / (1024 * 1024)),
 			       (unsigned long)(unused_mem / (1024 * 1024)),
-			       (double)(total_padbuffer_mem * 100.0 / remaining_mem_size));
-		} else if (use_multiple_buffers && remaining_mem_size > 0) {
+			       (double)(total_padbuffer_mem * 100.0 / remaining_vram));
+		} else if (use_multiple_buffers && remaining_vram > 0) {
 			applog(LOG_INFO, "GPU %d: padbuffer8 buffers use %lu MB (100%% utilization)",
 			       gpu, (unsigned long)(total_padbuffer_mem / (1024 * 1024)));
+		}
+
+		// Calculate padbuffer8_RAM buffers (system RAM) if enabled
+		clState->num_padbuffers_RAM = 0;
+		for (int i = 0; i < 2; i++) {
+			clState->padbuffer8_RAM[i] = NULL;
+			clState->groups_per_buffer_RAM[i] = 0;
+		}
+
+		cl_ulong total_ram_mem = 0;
+		if (opt_use_system_ram && available_system_ram > 0) {
+			// Calculate how many groups are already covered by VRAM buffers
+			size_t groups_covered_by_vram = 0;
+			for (int i = 0; i < clState->num_padbuffers; i++) {
+				groups_covered_by_vram += clState->groups_per_buffer[i];
+			}
+			
+			// Calculate remaining groups that need to be covered by system RAM
+			size_t remaining_groups = number_groups - groups_covered_by_vram;
+			
+			if (remaining_groups > 0 && available_system_ram > 0) {
+				// Optimize system RAM buffer configuration (max 2 buffers)
+				// Each buffer size must not exceed cgpu->max_alloc
+				size_t optimal_num_buffers_ram = 0;
+				size_t optimal_groups_per_buffer_ram[2] = {0, 0};
+				cl_ulong best_ram_utilization = 0;
+				cl_ulong target_ram_utilization = available_system_ram * 99 / 100;
+				
+				// Try 1 buffer first
+				size_t single_ram_buffer_size = each_group_size * remaining_groups;
+				if (single_ram_buffer_size <= available_system_ram && single_ram_buffer_size <= cgpu->max_alloc) {
+					cl_ulong single_ram_utilization = single_ram_buffer_size;
+					if (single_ram_utilization >= target_ram_utilization) {
+						optimal_num_buffers_ram = 1;
+						optimal_groups_per_buffer_ram[0] = remaining_groups;
+						best_ram_utilization = single_ram_utilization;
+						goto found_optimal_ram_config;
+					}
+					if (single_ram_utilization > best_ram_utilization) {
+						optimal_num_buffers_ram = 1;
+						optimal_groups_per_buffer_ram[0] = remaining_groups;
+						best_ram_utilization = single_ram_utilization;
+					}
+				}
+				
+				// Try 2 buffers (maximum)
+				// Each buffer must not exceed cgpu->max_alloc
+				size_t best_2ram_config[2] = {0, 0};
+				cl_ulong best_2ram_utilization = 0;
+				for (size_t groups_ram1 = remaining_groups / 2; groups_ram1 > 0; groups_ram1--) {
+					size_t groups_ram2 = remaining_groups - groups_ram1;
+					size_t ram1_size = each_group_size * groups_ram1;
+					size_t ram2_size = each_group_size * groups_ram2;
+					cl_ulong total_ram_size = ram1_size + ram2_size;
+					// Check both individual buffer sizes and total size
+					if (ram1_size <= cgpu->max_alloc && ram2_size <= cgpu->max_alloc &&
+					    total_ram_size <= available_system_ram && total_ram_size > best_2ram_utilization) {
+						best_2ram_config[0] = groups_ram1;
+						best_2ram_config[1] = groups_ram2;
+						best_2ram_utilization = total_ram_size;
+					}
+				}
+				if (best_2ram_utilization > best_ram_utilization) {
+					optimal_num_buffers_ram = 2;
+					optimal_groups_per_buffer_ram[0] = best_2ram_config[0];
+					optimal_groups_per_buffer_ram[1] = best_2ram_config[1];
+					best_ram_utilization = best_2ram_utilization;
+				}
+				
+found_optimal_ram_config:
+				clState->num_padbuffers_RAM = optimal_num_buffers_ram;
+				for (int i = 0; i < optimal_num_buffers_ram; i++) {
+					clState->groups_per_buffer_RAM[i] = optimal_groups_per_buffer_ram[i];
+				}
+				
+				// Calculate total memory used by padbuffer8_RAM buffers
+				for (int i = 0; i < optimal_num_buffers_ram; i++) {
+					total_ram_mem += each_group_size * optimal_groups_per_buffer_ram[i];
+				}
+				
+				cl_ulong unused_ram = 0;
+				if (total_ram_mem < available_system_ram) {
+					unused_ram = available_system_ram - total_ram_mem;
+				}
+				
+				applog(LOG_DEBUG, "GPU %d: Calculated padbuffer8_RAM config: %zu buffers, groups per buffer: [%zu, %zu]",
+				       gpu, clState->num_padbuffers_RAM,
+				       clState->groups_per_buffer_RAM[0], clState->groups_per_buffer_RAM[1]);
+				
+				if (unused_ram > 0) {
+					applog(LOG_INFO, "GPU %d: padbuffer8_RAM buffers use %lu MB, %lu MB remaining unused (%.1f%% utilization)",
+					       gpu, (unsigned long)(total_ram_mem / (1024 * 1024)),
+					       (unsigned long)(unused_ram / (1024 * 1024)),
+					       (double)(total_ram_mem * 100.0 / available_system_ram));
+				} else if (optimal_num_buffers_ram > 0) {
+					applog(LOG_INFO, "GPU %d: padbuffer8_RAM buffers use %lu MB (100%% utilization)",
+					       gpu, (unsigned long)(total_ram_mem / (1024 * 1024)));
+				}
+			}
+		}
+
+		// Final validation: ensure total groups and memory allocations match expectations
+		size_t total_groups_allocated = 0;
+		for (int i = 0; i < clState->num_padbuffers; i++)
+			total_groups_allocated += clState->groups_per_buffer[i];
+		for (int i = 0; i < clState->num_padbuffers_RAM; i++)
+			total_groups_allocated += clState->groups_per_buffer_RAM[i];
+
+		cl_ulong total_mem_allocated = total_padbuffer_mem + total_ram_mem;
+
+		if (total_groups_allocated != number_groups || total_mem_allocated != total_groups_size) {
+			applog(LOG_ERR, "GPU %d: Inconsistent buffer allocation detected (groups: %zu vs %zu, bytes: %lu vs %lu)",
+			       gpu,
+			       total_groups_allocated, (size_t)number_groups,
+			       (unsigned long)total_mem_allocated, (unsigned long)total_groups_size);
+			return NULL;
 		}
 	}
 #endif
@@ -886,21 +1102,28 @@ build:
 	}
 
 	/* create a cl program executable for all the devices specified */
-	char *CompilerOptions = calloc(1, 512);  // Increased size for multiple buffer defines
+	char *CompilerOptions = calloc(1, 1024);  // Increased size for multiple buffer defines (VRAM + system RAM)
 
 #ifdef USE_SCRYPT
 	if (opt_scrypt)
 	{
-		// Calculate threads per buffer for ROMix indexing
+		// Calculate threads per buffer for ROMix indexing (VRAM buffers)
 		size_t threads_per_buffer[3];
 		threads_per_buffer[0] = clState->groups_per_buffer[0] * clState->wsize;
 		threads_per_buffer[1] = clState->groups_per_buffer[1] * clState->wsize;
 		threads_per_buffer[2] = clState->groups_per_buffer[2] * clState->wsize;
 		
-		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d -D NUM_PADBUFFERS=%zu -D THREADS_PER_BUFFER_0=%zu -D THREADS_PER_BUFFER_1=%zu -D THREADS_PER_BUFFER_2=%zu",
+		// Calculate threads per buffer for ROMix indexing (system RAM buffers)
+		size_t threads_per_buffer_ram[2];
+		threads_per_buffer_ram[0] = clState->groups_per_buffer_RAM[0] * clState->wsize;
+		threads_per_buffer_ram[1] = clState->groups_per_buffer_RAM[1] * clState->wsize;
+		
+		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d -D NUM_PADBUFFERS=%zu -D THREADS_PER_BUFFER_0=%zu -D THREADS_PER_BUFFER_1=%zu -D THREADS_PER_BUFFER_2=%zu -D NUM_PADBUFFERS_RAM=%zu -D THREADS_PER_BUFFER_RAM_0=%zu -D THREADS_PER_BUFFER_RAM_1=%zu",
 			cgpu->lookup_gap, (unsigned int)cgpu->thread_concurrency, (int)clState->wsize,
 			clState->num_padbuffers,
-			threads_per_buffer[0], threads_per_buffer[1], threads_per_buffer[2]);
+			threads_per_buffer[0], threads_per_buffer[1], threads_per_buffer[2],
+			clState->num_padbuffers_RAM,
+			threads_per_buffer_ram[0], threads_per_buffer_ram[1]);
 	}
 	else
 #endif
@@ -1160,27 +1383,10 @@ built:
 		       gpu, clState->num_padbuffers,
 		       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2]);
 
-		/* Create buffers - use host memory if option is enabled, otherwise use device memory */
-		cl_mem_flags flags = CL_MEM_READ_WRITE;
-		bool use_host_memory = false;
-		
-		if (opt_padbuffer_host_memory) {
-			flags |= CL_MEM_ALLOC_HOST_PTR;
-			use_host_memory = true;
-		}
-		
-		// Create all padbuffer8 buffers
+		// Create all padbuffer8 buffers (VRAM)
 		for (size_t i = 0; i < clState->num_padbuffers; i++) {
 			size_t buf_size = each_group_size * clState->groups_per_buffer[i];
-			clState->padbuffer8[i] = clCreateBuffer(clState->context, flags, buf_size, NULL, &status);
-			
-			/* Fallback to device memory if host allocation fails */
-			if ((status != CL_SUCCESS || !clState->padbuffer8[i]) && use_host_memory) {
-				applog(LOG_WARNING, "Host-allocated memory failed for buffer %zu (error %d), falling back to device memory", i, status);
-				use_host_memory = false;
-				clState->padbuffer8[i] = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
-				                                    buf_size, NULL, &status);
-			}
+			clState->padbuffer8[i] = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, buf_size, NULL, &status);
 			
 			if (status != CL_SUCCESS || !clState->padbuffer8[i]) {
 				applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8[%zu]) failed, size: %zu bytes", status, i, (unsigned long)buf_size);
@@ -1197,9 +1403,68 @@ built:
 			       (unsigned long)buf_size, (unsigned long)(buf_size / (1024 * 1024)));
 		}
 		
-		applog(LOG_INFO, "Created %zu padbuffer8 buffer(s) using %s", 
-		       clState->num_padbuffers,
-		       use_host_memory ? "OpenCL-allocated host (pinned) memory" : "device memory");
+		applog(LOG_INFO, "Created %zu padbuffer8 buffer(s) using device memory", 
+		       clState->num_padbuffers);
+
+		// Create padbuffer8_RAM buffers (system RAM) if enabled
+		if (opt_use_system_ram && clState->num_padbuffers_RAM > 0) {
+			applog(LOG_INFO, "GPU %d: Creating %zu padbuffer8_RAM buffer(s), groups per buffer: [%zu, %zu]",
+			       gpu, clState->num_padbuffers_RAM,
+			       clState->groups_per_buffer_RAM[0], clState->groups_per_buffer_RAM[1]);
+			
+			// Create all padbuffer8_RAM buffers using CL_MEM_ALLOC_HOST_PTR for system RAM
+			for (size_t i = 0; i < clState->num_padbuffers_RAM; i++) {
+				size_t buf_size = each_group_size * clState->groups_per_buffer_RAM[i];
+				// Safety check: ensure buffer size doesn't exceed max_alloc
+				if (buf_size > cgpu->max_alloc) {
+					applog(LOG_ERR, "GPU %d: padbuffer8_RAM[%zu] size (%zu bytes) exceeds max_alloc (%lu bytes)", 
+					       gpu, i, (unsigned long)buf_size, (long unsigned int)cgpu->max_alloc);
+					// Release already created buffers
+					for (size_t j = 0; j < i; j++) {
+						if (clState->padbuffer8_RAM[j]) {
+							clReleaseMemObject(clState->padbuffer8_RAM[j]);
+							clState->padbuffer8_RAM[j] = NULL;
+						}
+					}
+					// Also release VRAM buffers
+					for (size_t j = 0; j < clState->num_padbuffers; j++) {
+						if (clState->padbuffer8[j]) {
+							clReleaseMemObject(clState->padbuffer8[j]);
+							clState->padbuffer8[j] = NULL;
+						}
+					}
+					return NULL;
+				}
+				clState->padbuffer8_RAM[i] = clCreateBuffer(clState->context, 
+				                                            CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, 
+				                                            buf_size, NULL, &status);
+				
+				/* Host allocation failed */
+				if (status != CL_SUCCESS || !clState->padbuffer8_RAM[i]) {
+					applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8_RAM[%zu]) failed, size: %zu bytes", status, i, (unsigned long)buf_size);
+					// Release already created system RAM buffers
+					for (size_t j = 0; j < i; j++) {
+						if (clState->padbuffer8_RAM[j]) {
+							clReleaseMemObject(clState->padbuffer8_RAM[j]);
+							clState->padbuffer8_RAM[j] = NULL;
+						}
+					}
+					// Release VRAM buffers
+					for (size_t j = 0; j < clState->num_padbuffers; j++) {
+						if (clState->padbuffer8[j]) {
+							clReleaseMemObject(clState->padbuffer8[j]);
+							clState->padbuffer8[j] = NULL;
+						}
+					}
+					quit(1, "Failed to allocate system RAM buffer for GPU %d (padbuffer8_RAM[%zu])", gpu, i);
+				}
+				applog(LOG_DEBUG, "Created padbuffer8_RAM[%zu]: %zu bytes (%zu MB)", i, 
+				       (unsigned long)buf_size, (unsigned long)(buf_size / (1024 * 1024)));
+			}
+			
+			applog(LOG_INFO, "Created %zu padbuffer8_RAM buffer(s) using OpenCL-allocated host (system RAM) memory", 
+			       clState->num_padbuffers_RAM);
+		}
 
 		clState->CLbuffer0 = clCreateBuffer(clState->context, CL_MEM_READ_ONLY, 128, NULL, &status);
 		if (status != CL_SUCCESS) {

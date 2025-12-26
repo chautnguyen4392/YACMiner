@@ -26,6 +26,9 @@ typedef struct {
 	size_t padbufsize;
 	size_t num_padbuffers;  // Number of padbuffer8 buffers (1-3)
 	size_t groups_per_buffer[3];  // Number of groups per buffer
+	cl_mem padbuffer8_RAM[2];  // System RAM buffers (up to 2) for additional memory
+	size_t num_padbuffers_RAM;  // Number of padbuffer8_RAM buffers (0-2)
+	size_t groups_per_buffer_RAM[2];  // Number of groups per buffer for system RAM
 	void * cldata;
 	// Split kernel support
 	cl_kernel kernel_part1;

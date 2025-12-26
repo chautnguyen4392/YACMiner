@@ -997,7 +997,7 @@ __global uchar * restrict padcache0
 }
 
 // New kernel for 84-byte block header (with 8-byte timestamp)
-// Supports multiple padbuffer8 buffers for better memory utilization
+// Supports multiple padbuffer8 buffers (VRAM) and padbuffer8_RAM buffers (system RAM) for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84(__global const uint4 * restrict input,
 volatile __global uint * restrict output,
@@ -1009,6 +1009,12 @@ __global uchar * restrict padcache0
 #endif
 #if NUM_PADBUFFERS >= 3
 , __global uchar * restrict padcache2
+#endif
+#if NUM_PADBUFFERS_RAM >= 1
+	, __global uchar * restrict padcache_ram0
+#endif
+#if NUM_PADBUFFERS_RAM >= 2
+	, __global uchar * restrict padcache_ram1
 #endif
 , const uint target)
 {
@@ -1038,14 +1044,27 @@ __global uchar * restrict padcache0
 	__global uchar * padcache = (__global uchar *)0;
 	uint buffer_xSIZE = 0;
 	
+	// Calculate total threads in VRAM buffers
+	uint total_vram_threads = 0;
 #if NUM_PADBUFFERS == 1
-	padcache = padcache0;
-	buffer_xSIZE = THREADS_PER_BUFFER_0;
+	total_vram_threads = THREADS_PER_BUFFER_0;
+#elif NUM_PADBUFFERS == 2
+	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1;
+#elif NUM_PADBUFFERS == 3
+	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2;
+#endif
+	
+	// First check VRAM buffers
+#if NUM_PADBUFFERS == 1
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	}
 #elif NUM_PADBUFFERS == 2
 	if (relative_gid < THREADS_PER_BUFFER_0) {
 		padcache = padcache0;
 		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else {
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
 		padcache = padcache1;
 		buffer_xSIZE = THREADS_PER_BUFFER_1;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
@@ -1058,10 +1077,34 @@ __global uchar * restrict padcache0
 		padcache = padcache1;
 		buffer_xSIZE = THREADS_PER_BUFFER_1;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	} else {
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
 		padcache = padcache2;
 		buffer_xSIZE = THREADS_PER_BUFFER_2;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	}
+#endif
+	
+	// If not in VRAM buffers, check system RAM buffers
+#if NUM_PADBUFFERS_RAM >= 1
+	if (padcache == (__global uchar *)0 && relative_gid >= total_vram_threads) {
+		uint ram_relative_gid = relative_gid - total_vram_threads;
+#if NUM_PADBUFFERS_RAM == 1
+		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
+			padcache = padcache_ram0;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+			relative_gid = ram_relative_gid;
+		}
+#elif NUM_PADBUFFERS_RAM == 2
+		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
+			padcache = padcache_ram0;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+			relative_gid = ram_relative_gid;
+		} else if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
+			padcache = padcache_ram1;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
+			relative_gid = ram_relative_gid - THREADS_PER_BUFFER_RAM_0;
+		}
+#endif
 	}
 #endif
 
@@ -1149,7 +1192,7 @@ __kernel void search84_part1(
 
 // Part 2: ROMix
 // Computes: X → X', loads X from temp_X, stores result to temp_X2
-// Supports multiple padbuffer8 buffers for better memory utilization
+// Supports multiple padbuffer8 buffers (VRAM) and padbuffer8_RAM buffers (system RAM) for better memory utilization
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part2(
 	__global const uint4 * restrict temp_X,      // X from part1 (read-only)
@@ -1162,6 +1205,12 @@ __kernel void search84_part2(
 #endif
 #if NUM_PADBUFFERS >= 3
 	, __global uchar * restrict padcache2
+#endif
+#if NUM_PADBUFFERS_RAM >= 1
+	, __global uchar * restrict padcache_ram0
+#endif
+#if NUM_PADBUFFERS_RAM >= 2
+	, __global uchar * restrict padcache_ram1
 #endif
 )
 {
@@ -1187,14 +1236,27 @@ __kernel void search84_part2(
 	__global uchar * padcache = (__global uchar *)0;
 	uint buffer_xSIZE = 0;
 	
+	// Calculate total threads in VRAM buffers
+	uint total_vram_threads = 0;
 #if NUM_PADBUFFERS == 1
-	padcache = padcache0;
-	buffer_xSIZE = THREADS_PER_BUFFER_0;
+	total_vram_threads = THREADS_PER_BUFFER_0;
+#elif NUM_PADBUFFERS == 2
+	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1;
+#elif NUM_PADBUFFERS == 3
+	total_vram_threads = THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2;
+#endif
+	
+	// First check VRAM buffers
+#if NUM_PADBUFFERS == 1
+	if (relative_gid < THREADS_PER_BUFFER_0) {
+		padcache = padcache0;
+		buffer_xSIZE = THREADS_PER_BUFFER_0;
+	}
 #elif NUM_PADBUFFERS == 2
 	if (relative_gid < THREADS_PER_BUFFER_0) {
 		padcache = padcache0;
 		buffer_xSIZE = THREADS_PER_BUFFER_0;
-	} else {
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1) {
 		padcache = padcache1;
 		buffer_xSIZE = THREADS_PER_BUFFER_1;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
@@ -1207,10 +1269,34 @@ __kernel void search84_part2(
 		padcache = padcache1;
 		buffer_xSIZE = THREADS_PER_BUFFER_1;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0;
-	} else {
+	} else if (relative_gid < THREADS_PER_BUFFER_0 + THREADS_PER_BUFFER_1 + THREADS_PER_BUFFER_2) {
 		padcache = padcache2;
 		buffer_xSIZE = THREADS_PER_BUFFER_2;
 		relative_gid = relative_gid - THREADS_PER_BUFFER_0 - THREADS_PER_BUFFER_1;
+	}
+#endif
+	
+	// If not in VRAM buffers, check system RAM buffers
+#if NUM_PADBUFFERS_RAM >= 1
+	if (padcache == (__global uchar *)0 && relative_gid >= total_vram_threads) {
+		uint ram_relative_gid = relative_gid - total_vram_threads;
+#if NUM_PADBUFFERS_RAM == 1
+		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
+			padcache = padcache_ram0;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+			relative_gid = ram_relative_gid;
+		}
+#elif NUM_PADBUFFERS_RAM == 2
+		if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0) {
+			padcache = padcache_ram0;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_0;
+			relative_gid = ram_relative_gid;
+		} else if (ram_relative_gid < THREADS_PER_BUFFER_RAM_0 + THREADS_PER_BUFFER_RAM_1) {
+			padcache = padcache_ram1;
+			buffer_xSIZE = THREADS_PER_BUFFER_RAM_1;
+			relative_gid = ram_relative_gid - THREADS_PER_BUFFER_RAM_0;
+		}
+#endif
 	}
 #endif
 	
