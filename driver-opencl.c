@@ -2232,6 +2232,17 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 		if (clState->temp_X2_buffer) clReleaseMemObject(clState->temp_X2_buffer);
 		applog(LOG_DEBUG, "Released split kernel resources");
 	}
+	
+	// Release padbuffer8 (host memory is managed by OpenCL)
+	if (clState->padbuffer8) {
+		clReleaseMemObject(clState->padbuffer8);
+		clState->padbuffer8 = NULL;
+		applog(LOG_DEBUG, "Released padbuffer8 (host-allocated memory)");
+	}
+	
+	// Release other scrypt buffers
+	if (clState->CLbuffer0) clReleaseMemObject(clState->CLbuffer0);
+	if (clState->outputBuffer) clReleaseMemObject(clState->outputBuffer);
 #endif
 	
 	// Release monolithic kernel

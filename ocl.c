@@ -928,11 +928,11 @@ built:
 		size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
 		size_t bufsize = 128 * ipt * cgpu->thread_concurrency;
 
-		if (bufsize < cgpu->max_alloc) {
-			applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu", gpu, (unsigned long)cgpu->max_alloc);
-			applog(LOG_WARNING, "Your scrypt settings come to %lu, setting to %lu", (unsigned long)bufsize, (unsigned long)cgpu->max_alloc);
-			bufsize = cgpu->max_alloc;
-		}
+		// if (bufsize < cgpu->max_alloc) {
+		// 	applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu", gpu, (unsigned long)cgpu->max_alloc);
+		// 	applog(LOG_WARNING, "Your scrypt settings come to %lu, setting to %lu", (unsigned long)bufsize, (unsigned long)cgpu->max_alloc);
+		// 	bufsize = cgpu->max_alloc;
+		// }
 
 		if (!cgpu->buffer_size) {
 			applog(LOG_NOTICE, "GPU %d: bufsize for thread @ %dMB based on TC of %zu", gpu, (int)(bufsize/1048576),cgpu->thread_concurrency);
@@ -951,15 +951,33 @@ built:
 		applog(LOG_INFO, "Creating scrypt buffer sized %lu", (unsigned long)(bufsize));
 		clState->padbufsize = bufsize;
 
-		/* This buffer is weird and might work to some degree even if
-		 * the create buffer call has apparently failed, so check if we
-		 * get anything back before we call it a failure. */
+		/* Create buffer - use host memory if option is enabled, otherwise use device memory */
 		clState->padbuffer8 = NULL;
-		clState->padbuffer8 = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, bufsize, NULL, &status);
-		if (status != CL_SUCCESS && !clState->padbuffer8) {
-			applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8), decrease TC or increase LG", status);
+		cl_mem_flags flags = CL_MEM_READ_WRITE;
+		bool use_host_memory = false;
+		
+		if (opt_padbuffer_host_memory) {
+			flags |= CL_MEM_ALLOC_HOST_PTR;
+			use_host_memory = true;
+		}
+		
+		clState->padbuffer8 = clCreateBuffer(clState->context, flags, bufsize, NULL, &status);
+		
+		/* Fallback to device memory if host allocation fails */
+		if ((status != CL_SUCCESS || !clState->padbuffer8) && use_host_memory) {
+			applog(LOG_WARNING, "Host-allocated memory failed (error %d), falling back to device memory", status);
+			use_host_memory = false;
+			clState->padbuffer8 = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
+			                                    bufsize, NULL, &status);
+		}
+		
+		if (status != CL_SUCCESS || !clState->padbuffer8) {
+			applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8) failed, decrease TC or increase LG", status);
 			return NULL;
 		}
+		
+		applog(LOG_INFO, "Created padbuffer8 using %s", 
+		       use_host_memory ? "OpenCL-allocated host (pinned) memory" : "device memory");
 
 		clState->CLbuffer0 = clCreateBuffer(clState->context, CL_MEM_READ_ONLY, 128, NULL, &status);
 		if (status != CL_SUCCESS) {
