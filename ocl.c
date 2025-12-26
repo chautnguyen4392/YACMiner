@@ -395,6 +395,35 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	}
 	applog(LOG_DEBUG, "Max mem alloc size is %lu", (long unsigned int)(cgpu->max_alloc));
 
+	// Try AMD free memory extension first (more accurate for allocation decisions)
+	// CL_DEVICE_GLOBAL_FREE_MEMORY_AMD returns array of 4 size_t values (free memory in KB)
+	// Use first element (largest free memory block), convert KB to bytes
+	bool use_amd_free_mem = false;
+	if (strstr(extensions, "cl_amd_device_attribute_query")) {
+		size_t free_mem[4];
+		status = clGetDeviceInfo(devices[gpu], CL_DEVICE_GLOBAL_FREE_MEMORY_AMD, sizeof(free_mem), free_mem, NULL);
+		if (status == CL_SUCCESS && free_mem[0] > 0) {
+			cgpu->global_mem_size = (cl_ulong)free_mem[0] * 1024;
+			use_amd_free_mem = true;
+			applog(LOG_DEBUG, "AMD free memory (KB): [%zu, %zu, %zu, %zu], using %lu bytes", 
+			       free_mem[0], free_mem[1], free_mem[2], free_mem[3], 
+			       (long unsigned int)(cgpu->global_mem_size));
+		}
+	}
+
+	// Fallback to standard global memory size if AMD extension not used
+	if (!use_amd_free_mem) {
+		status = clGetDeviceInfo(devices[gpu], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), (void *)&cgpu->global_mem_size, NULL);
+		if (status != CL_SUCCESS) {
+			applog(LOG_ERR, "Error %d: Failed to clGetDeviceInfo when trying to get CL_DEVICE_GLOBAL_MEM_SIZE", status);
+			return NULL;
+		}
+	}
+
+	applog(LOG_DEBUG, "Global memory size is %lu (from %s)", 
+	       (long unsigned int)(cgpu->global_mem_size),
+	       use_amd_free_mem ? "CL_DEVICE_GLOBAL_FREE_MEMORY_AMD" : "CL_DEVICE_GLOBAL_MEM_SIZE");
+
 	/* Create binary filename based on parameters passed to opencl
 	 * compiler to ensure we only load a binary that matches what would
 	 * have otherwise created. The filename is:
@@ -565,6 +594,196 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			cgpu->thread_concurrency = (int)((cgpu->buffer_size * 1024 * 1024) / ipt / 128);
 			applog(LOG_DEBUG, "GPU %d: setting thread_concurrency to %lu based on buffer size %lu and lookup gap %d", gpu, (unsigned long)(cgpu->thread_concurrency),(unsigned long)(cgpu->buffer_size),(int)(cgpu->lookup_gap));
 		}
+
+		// Calculate optimal buffer configuration for multiple padbuffer8 buffers
+		// Initialize padbuffer8 array
+		clState->num_padbuffers = 0;
+		for (int i = 0; i < 3; i++) {
+			clState->padbuffer8[i] = NULL;
+			clState->groups_per_buffer[i] = 0;
+		}
+
+		size_t each_item_size = 128 * ipt;
+		size_t each_group_size = each_item_size * clState->wsize;
+		size_t number_groups = cgpu->thread_concurrency / clState->wsize;
+
+		// Calculate remaining memory after other buffers (conservative estimate)
+		size_t CLbuffer0_size = 128;
+		size_t outputBuffer_size = SCRYPT_BUFFERSIZE;
+		// Estimate temp buffers (will be created later if split kernels enabled)
+		size_t temp_X_size = cgpu->thread_concurrency * 8 * sizeof(cl_uint4);
+		size_t temp_X2_size = temp_X_size;
+		size_t other_buffers_size = CLbuffer0_size + outputBuffer_size + temp_X_size + temp_X2_size;
+		
+		cl_ulong remaining_mem_size = 0;
+		bool use_multiple_buffers = false;
+		
+		if (cgpu->max_alloc < cgpu->global_mem_size) {
+			if (cgpu->global_mem_size > other_buffers_size) {
+				remaining_mem_size = cgpu->global_mem_size - other_buffers_size;
+				if (remaining_mem_size > cgpu->max_alloc) {
+					use_multiple_buffers = true;
+				}
+			}
+		}
+
+		// Ensure total size for all groups fits within remaining_mem_size to prevent memory overlap
+		cl_ulong total_groups_size = (cl_ulong)number_groups * each_group_size;
+		if (remaining_mem_size > 0 && total_groups_size > remaining_mem_size) {
+			applog(LOG_ERR, "GPU %d: Total groups size (%lu bytes) exceeds remaining memory (%lu bytes). "
+			       "This would cause memory overlap. Please reduce thread_concurrency or lookup_gap.", 
+			       gpu, (long unsigned int)total_groups_size, (long unsigned int)remaining_mem_size);
+			applog(LOG_ERR, "GPU %d: Required: %zu groups * %zu bytes/group = %lu bytes", 
+			       gpu, number_groups, each_group_size, (long unsigned int)total_groups_size);
+			applog(LOG_ERR, "GPU %d: Available: %lu bytes (global_mem: %lu, other_buffers: %zu)", 
+			       gpu, (long unsigned int)remaining_mem_size, 
+			       (long unsigned int)cgpu->global_mem_size, other_buffers_size);
+			return NULL;
+		}
+
+		size_t buffer_size = 0;
+		size_t optimal_num_buffers = 1;
+		size_t optimal_groups_per_buffer[3] = {0, 0, 0};
+		cl_ulong best_utilization = 0;  // Track best memory utilization
+
+		if (use_multiple_buffers && number_groups > 0) {
+			// Try configurations starting from 1 buffer, find smallest number that maximizes utilization
+			// Target: use at least 99% of remaining memory
+			cl_ulong target_utilization = remaining_mem_size * 99 / 100;
+			
+			// Try 1 buffer first
+			size_t single_buffer_size = each_group_size * number_groups;
+			if (single_buffer_size > cgpu->max_alloc) {
+				single_buffer_size = cgpu->max_alloc;
+			}
+			cl_ulong single_buffer_utilization = single_buffer_size;
+			if (single_buffer_size <= cgpu->max_alloc && single_buffer_utilization >= target_utilization) {
+				optimal_num_buffers = 1;
+				buffer_size = single_buffer_size;
+				optimal_groups_per_buffer[0] = buffer_size / each_group_size;
+				best_utilization = single_buffer_utilization;
+				goto found_optimal_config;
+			}
+			// Track best so far even if below target
+			if (single_buffer_utilization > best_utilization) {
+				optimal_num_buffers = 1;
+				buffer_size = single_buffer_size;
+				optimal_groups_per_buffer[0] = buffer_size / each_group_size;
+				best_utilization = single_buffer_utilization;
+			}
+			
+			// Try 2 buffers
+			size_t best_2buf_config[2] = {0, 0};
+			cl_ulong best_2buf_utilization = 0;
+			for (size_t groups_buf1 = number_groups / 2; groups_buf1 > 0; groups_buf1--) {
+				size_t groups_buf2 = number_groups - groups_buf1;
+				size_t buf1_size = each_group_size * groups_buf1;
+				size_t buf2_size = each_group_size * groups_buf2;
+				if (buf1_size <= cgpu->max_alloc && buf2_size <= cgpu->max_alloc) {
+					cl_ulong total_size = buf1_size + buf2_size;
+					if (total_size <= remaining_mem_size && total_size > best_2buf_utilization) {
+						best_2buf_config[0] = groups_buf1;
+						best_2buf_config[1] = groups_buf2;
+						best_2buf_utilization = total_size;
+					}
+				}
+			}
+			if (best_2buf_utilization > best_utilization) {
+				optimal_num_buffers = 2;
+				optimal_groups_per_buffer[0] = best_2buf_config[0];
+				optimal_groups_per_buffer[1] = best_2buf_config[1];
+				buffer_size = (each_group_size * best_2buf_config[0] > each_group_size * best_2buf_config[1]) ?
+				              (each_group_size * best_2buf_config[0]) : (each_group_size * best_2buf_config[1]);
+				best_utilization = best_2buf_utilization;
+				// If this meets target, use it (smallest number that works)
+				if (best_2buf_utilization >= target_utilization) {
+					goto found_optimal_config;
+				}
+			}
+			
+			// Try 3 buffers only if 2 buffers didn't meet target
+			if (best_utilization < target_utilization) {
+				size_t best_3buf_config[3] = {0, 0, 0};
+				cl_ulong best_3buf_utilization = 0;
+				for (size_t groups_buf1 = number_groups / 3; groups_buf1 > 0; groups_buf1--) {
+					for (size_t groups_buf2 = (number_groups - groups_buf1) / 2; groups_buf2 > 0; groups_buf2--) {
+						size_t groups_buf3 = number_groups - groups_buf1 - groups_buf2;
+						size_t buf1_size = each_group_size * groups_buf1;
+						size_t buf2_size = each_group_size * groups_buf2;
+						size_t buf3_size = each_group_size * groups_buf3;
+						size_t max_buf_size = (buf1_size > buf2_size) ? 
+							((buf1_size > buf3_size) ? buf1_size : buf3_size) :
+							((buf2_size > buf3_size) ? buf2_size : buf3_size);
+						if (max_buf_size <= cgpu->max_alloc) {
+							cl_ulong total_size = buf1_size + buf2_size + buf3_size;
+							if (total_size <= remaining_mem_size && total_size > best_3buf_utilization) {
+								best_3buf_config[0] = groups_buf1;
+								best_3buf_config[1] = groups_buf2;
+								best_3buf_config[2] = groups_buf3;
+								best_3buf_utilization = total_size;
+							}
+						}
+					}
+				}
+				if (best_3buf_utilization > best_utilization) {
+					optimal_num_buffers = 3;
+					optimal_groups_per_buffer[0] = best_3buf_config[0];
+					optimal_groups_per_buffer[1] = best_3buf_config[1];
+					optimal_groups_per_buffer[2] = best_3buf_config[2];
+					size_t buf1_size = each_group_size * best_3buf_config[0];
+					size_t buf2_size = each_group_size * best_3buf_config[1];
+					size_t buf3_size = each_group_size * best_3buf_config[2];
+					buffer_size = (buf1_size > buf2_size) ? 
+						((buf1_size > buf3_size) ? buf1_size : buf3_size) :
+						((buf2_size > buf3_size) ? buf2_size : buf3_size);
+					best_utilization = best_3buf_utilization;
+				}
+			}
+		} else {
+			// Fallback to single buffer if multiple buffers not applicable
+			buffer_size = each_group_size * number_groups;
+			if (buffer_size > cgpu->max_alloc) {
+				buffer_size = cgpu->max_alloc;
+				// Recalculate number_groups based on max_alloc
+				number_groups = buffer_size / each_group_size;
+			}
+			optimal_groups_per_buffer[0] = number_groups;
+		}
+		
+found_optimal_config:
+		clState->num_padbuffers = optimal_num_buffers;
+		for (int i = 0; i < optimal_num_buffers; i++) {
+			clState->groups_per_buffer[i] = optimal_groups_per_buffer[i];
+		}
+		clState->padbufsize = buffer_size;
+
+		// Calculate total memory used by padbuffer8 buffers
+		cl_ulong total_padbuffer_mem = 0;
+		for (int i = 0; i < optimal_num_buffers; i++) {
+			total_padbuffer_mem += each_group_size * optimal_groups_per_buffer[i];
+		}
+		
+		// Calculate remaining unused memory
+		cl_ulong unused_mem = 0;
+		if (use_multiple_buffers && remaining_mem_size > 0) {
+			if (total_padbuffer_mem < remaining_mem_size) {
+				unused_mem = remaining_mem_size - total_padbuffer_mem;
+			}
+		}
+
+		applog(LOG_DEBUG, "GPU %d: Calculated buffer config: %zu buffers, groups per buffer: [%zu, %zu, %zu]",
+		       gpu, clState->num_padbuffers,
+		       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2]);
+		
+		if (unused_mem > 0) {
+			applog(LOG_INFO, "GPU %d: padbuffer8 buffers use %lu MB, %lu MB remaining unused (%.1f%% utilization)",
+			       gpu, (unsigned long)(total_padbuffer_mem / (1024 * 1024)),
+			       (unsigned long)(unused_mem / (1024 * 1024)),
+			       (double)(total_padbuffer_mem * 100.0 / remaining_mem_size));
+		} else if (use_multiple_buffers && remaining_mem_size > 0) {
+			applog(LOG_INFO, "GPU %d: padbuffer8 buffers use %lu MB (100%% utilization)",
+			       gpu, (unsigned long)(total_padbuffer_mem / (1024 * 1024)));
+		}
 	}
 #endif
 
@@ -667,13 +886,21 @@ build:
 	}
 
 	/* create a cl program executable for all the devices specified */
-	char *CompilerOptions = calloc(1, 256);
+	char *CompilerOptions = calloc(1, 512);  // Increased size for multiple buffer defines
 
 #ifdef USE_SCRYPT
 	if (opt_scrypt)
 	{
-		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d",
-			cgpu->lookup_gap, (unsigned int)cgpu->thread_concurrency, (int)clState->wsize);
+		// Calculate threads per buffer for ROMix indexing
+		size_t threads_per_buffer[3];
+		threads_per_buffer[0] = clState->groups_per_buffer[0] * clState->wsize;
+		threads_per_buffer[1] = clState->groups_per_buffer[1] * clState->wsize;
+		threads_per_buffer[2] = clState->groups_per_buffer[2] * clState->wsize;
+		
+		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d -D NUM_PADBUFFERS=%zu -D THREADS_PER_BUFFER_0=%zu -D THREADS_PER_BUFFER_1=%zu -D THREADS_PER_BUFFER_2=%zu",
+			cgpu->lookup_gap, (unsigned int)cgpu->thread_concurrency, (int)clState->wsize,
+			clState->num_padbuffers,
+			threads_per_buffer[0], threads_per_buffer[1], threads_per_buffer[2]);
 	}
 	else
 #endif
@@ -916,7 +1143,7 @@ built:
 
 #ifdef USE_SCRYPT
 	if (opt_scrypt) {
-
+		// Buffer configuration was already calculated earlier, now create the buffers
 		unsigned long bsize;
 		if (opt_scrypt_chacha && opt_fixed_nfactor > 0)
 			bsize = 1 << (opt_fixed_nfactor + 1);
@@ -926,33 +1153,14 @@ built:
 			bsize = 1024;
 
 		size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
-		size_t bufsize = 128 * ipt * cgpu->thread_concurrency;
+		size_t each_item_size = 128 * ipt;
+		size_t each_group_size = each_item_size * clState->wsize;
 
-		// if (bufsize < cgpu->max_alloc) {
-		// 	applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu", gpu, (unsigned long)cgpu->max_alloc);
-		// 	applog(LOG_WARNING, "Your scrypt settings come to %lu, setting to %lu", (unsigned long)bufsize, (unsigned long)cgpu->max_alloc);
-		// 	bufsize = cgpu->max_alloc;
-		// }
+		applog(LOG_INFO, "GPU %d: Creating %zu padbuffer8 buffer(s), groups per buffer: [%zu, %zu, %zu]",
+		       gpu, clState->num_padbuffers,
+		       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2]);
 
-		if (!cgpu->buffer_size) {
-			applog(LOG_NOTICE, "GPU %d: bufsize for thread @ %dMB based on TC of %zu", gpu, (int)(bufsize/1048576),cgpu->thread_concurrency);
-		} else {
-			applog(LOG_NOTICE, "GPU %d: bufsize for thread @ %dMB based on buffer-size", gpu, (int)(cgpu->buffer_size));
-			bufsize = (size_t)(cgpu->buffer_size)*(1048576);
-		}
-
-		/* Use the max alloc value which has been rounded to a power of
-		 * 2 greater >= required amount earlier */
-		if (bufsize > cgpu->max_alloc) {
-			applog(LOG_WARNING, "Maximum buffer memory device %d supports says %lu",
-						gpu, (long unsigned int)(cgpu->max_alloc));
-			applog(LOG_WARNING, "Your scrypt settings come to %d", (int)bufsize);
-		}
-		applog(LOG_INFO, "Creating scrypt buffer sized %lu", (unsigned long)(bufsize));
-		clState->padbufsize = bufsize;
-
-		/* Create buffer - use host memory if option is enabled, otherwise use device memory */
-		clState->padbuffer8 = NULL;
+		/* Create buffers - use host memory if option is enabled, otherwise use device memory */
 		cl_mem_flags flags = CL_MEM_READ_WRITE;
 		bool use_host_memory = false;
 		
@@ -961,22 +1169,36 @@ built:
 			use_host_memory = true;
 		}
 		
-		clState->padbuffer8 = clCreateBuffer(clState->context, flags, bufsize, NULL, &status);
-		
-		/* Fallback to device memory if host allocation fails */
-		if ((status != CL_SUCCESS || !clState->padbuffer8) && use_host_memory) {
-			applog(LOG_WARNING, "Host-allocated memory failed (error %d), falling back to device memory", status);
-			use_host_memory = false;
-			clState->padbuffer8 = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
-			                                    bufsize, NULL, &status);
+		// Create all padbuffer8 buffers
+		for (size_t i = 0; i < clState->num_padbuffers; i++) {
+			size_t buf_size = each_group_size * clState->groups_per_buffer[i];
+			clState->padbuffer8[i] = clCreateBuffer(clState->context, flags, buf_size, NULL, &status);
+			
+			/* Fallback to device memory if host allocation fails */
+			if ((status != CL_SUCCESS || !clState->padbuffer8[i]) && use_host_memory) {
+				applog(LOG_WARNING, "Host-allocated memory failed for buffer %zu (error %d), falling back to device memory", i, status);
+				use_host_memory = false;
+				clState->padbuffer8[i] = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
+				                                    buf_size, NULL, &status);
+			}
+			
+			if (status != CL_SUCCESS || !clState->padbuffer8[i]) {
+				applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8[%zu]) failed, size: %zu bytes", status, i, (unsigned long)buf_size);
+				// Release already created buffers
+				for (size_t j = 0; j < i; j++) {
+					if (clState->padbuffer8[j]) {
+						clReleaseMemObject(clState->padbuffer8[j]);
+						clState->padbuffer8[j] = NULL;
+					}
+				}
+				return NULL;
+			}
+			applog(LOG_DEBUG, "Created padbuffer8[%zu]: %zu bytes (%zu MB)", i, 
+			       (unsigned long)buf_size, (unsigned long)(buf_size / (1024 * 1024)));
 		}
 		
-		if (status != CL_SUCCESS || !clState->padbuffer8) {
-			applog(LOG_ERR, "Error %d: clCreateBuffer (padbuffer8) failed, decrease TC or increase LG", status);
-			return NULL;
-		}
-		
-		applog(LOG_INFO, "Created padbuffer8 using %s", 
+		applog(LOG_INFO, "Created %zu padbuffer8 buffer(s) using %s", 
+		       clState->num_padbuffers,
 		       use_host_memory ? "OpenCL-allocated host (pinned) memory" : "device memory");
 
 		clState->CLbuffer0 = clCreateBuffer(clState->context, CL_MEM_READ_ONLY, 128, NULL, &status);
