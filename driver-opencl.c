@@ -318,6 +318,7 @@ char *set_gpu_map(char *arg)
 
 	return NULL;
 }
+#endif
 
 char *set_gpu_threads(char *arg)
 {
@@ -349,6 +350,7 @@ char *set_gpu_threads(char *arg)
 	return NULL;
 }
 
+#ifdef HAVE_ADL
 char *set_gpu_engine(char *arg)
 {
 	int i, val1 = 0, val2 = 0, device = 0;

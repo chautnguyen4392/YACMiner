@@ -6,7 +6,7 @@
 #ifdef USE_SCRYPT
 extern void sj_scrypt_regenhash(struct work *work);
 
-extern inline void sj_be32enc_vect(uint32_t *dst, const uint32_t *src, uint32_t len);
+extern void sj_be32enc_vect(uint32_t *dst, const uint32_t *src, uint32_t len);
 
 #else /* USE_SCRYPT */
 static inline int sj_scrypt_test(__maybe_unused unsigned char *pdata,
