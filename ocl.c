@@ -607,9 +607,14 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 
 	cl_context_properties cps[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0 };
 
-	clState->context = clCreateContextFromType(cps, CL_DEVICE_TYPE_GPU, NULL, NULL, &status);
+	/* Use clCreateContext with specific device instead of clCreateContextFromType
+	 * to avoid deadlock when multiple threads initialize GPUs simultaneously.
+	 * clCreateContextFromType creates a context for ALL GPUs which can cause
+	 * resource contention and deadlocks with NVIDIA drivers. */
+	cl_device_id device_list[1] = { devices[gpu] };
+	clState->context = clCreateContext(cps, 1, device_list, NULL, NULL, &status);
 	if (status != CL_SUCCESS) {
-		applog(LOG_ERR, "Error %d: Creating Context. (clCreateContextFromType)", status);
+		applog(LOG_ERR, "Error %d: Creating Context. (clCreateContext)", status);
 		return NULL;
 	}
 
