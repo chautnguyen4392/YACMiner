@@ -166,12 +166,13 @@ scrypt_hash_update_80(scrypt_hash_state *S, const uint4 *in4) {
 	const uchar *in = (const uchar *)in4;
 	uint i;
 
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
 	/* handle the current data */
 	keccak_block(S, in4);
 	in += SCRYPT_HASH_BLOCK_SIZE;
 
 	/* handle leftover data */
-	//S->leftover = 2;
+	/* S->leftover = 8 bytes, corresponding to uint2 */
 	
 	{
 		const uint2 *int2 = (const uint2 *) in;
@@ -205,10 +206,12 @@ scrypt_hash_update_128(scrypt_hash_state *S, const uint4 *in4) {
 
 static void
 scrypt_hash_update_4_after_80(scrypt_hash_state *S, uint in) {
-	// assume that leftover = 2
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
+	/* S->leftover = 8 bytes, corresponding to uint2 */
 	/* handle the previous data */
-	S->buffer4[0].zw = (uint2)(in, 0x01);
-	//S->leftover += 1;
+	/* Copy 4 bytes in to the buffer at the position of the leftover */
+	S->buffer4[0].zw = (uint2)(in, 0x01); // also do a part of scrypt_hash_finish_80_after_80_4 (S->buffer4[0].w = 0x01)
+	/* After this, S->leftover = 12 bytes, corresponding to 3 uint */
 }
 
 static void
@@ -219,32 +222,34 @@ scrypt_hash_update_4_after_128(scrypt_hash_state *S, uint in) {
 	//S->leftover += 1;
 }
 
+// New functions for 84-byte input
 static void
-scrypt_hash_update_12_after_80(scrypt_hash_state *S, const uint4 *in4) {
+scrypt_hash_update_84(scrypt_hash_state *S, const uint4 *in4) {
 	const uchar *in = (const uchar *)in4;
 	uint i;
 
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
 	/* handle the current data */
 	keccak_block(S, in4);
 	in += SCRYPT_HASH_BLOCK_SIZE;
 
 	/* handle leftover data */
-	//S->leftover = 4;
+	/* S->leftover = 12 bytes, corresponding to 3 uint */
 	
 	{
-		const uint2 *int2 = (const uint2 *) in;
-
-		S->buffer4[0].xy = int2[0].xy;
-		S->buffer4[0].zw = int2[1].xy;
+		const uint *in_uint = (const uint *) in;
+		S->buffer4[0].xyz = (uint3)(in_uint[0], in_uint[1], in_uint[2]);  // Copy 12 bytes
 	}
 }
 
 static void
-scrypt_hash_update_4_after_12_after_80(scrypt_hash_state *S, uint in) {
-	// assume that leftover = 4
+scrypt_hash_update_4_after_84(scrypt_hash_state *S, uint in) {
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
+	/* S->leftover = 12 bytes, corresponding to 3 uint */
 	/* handle the previous data */
-	S->buffer4[0].zw = (uint2)(in, 0x01);
-	//S->leftover += 1;
+	/* Copy 4 bytes in to the buffer at the position of the leftover */
+	S->buffer4[0].w = in;
+	/* After this, S->leftover = 16 bytes, corresponding to 4 uint */
 }
 
 static void
@@ -276,12 +281,15 @@ scrypt_hash_finish_80_after_64(scrypt_hash_state *S, uint4 *hash4) {
 static void
 scrypt_hash_finish_80_after_80_4(scrypt_hash_state *S, uint4 *hash4) {
 	uint i;
-	// assume that leftover = 3
+	/* Similar to scrypt_hash_finish in scrypt-jane-hash_keccak.h */
+	/* S->leftover = 12 bytes */
 	//S->buffer4[0].w = 0x01; // done already in scrypt_hash_update_4_after_80
+	/* Clear the remaining buffer */
 	#pragma unroll
 	for (i = 1; i < 4; i++) {
 		S->buffer4[i] = ZERO;
 	}
+	/* Add the padding byte and the final 0x80000000 */
 	S->buffer4[4].xy = (uint2)(0, 0x80000000);
 	
 	keccak_block(S, S->buffer4);
@@ -306,14 +314,21 @@ scrypt_hash_finish_80_after_128_4(scrypt_hash_state *S, uint4 *hash4) {
 	}
 }
 
+// New hash finish function for 84-byte input
 static void
-scrypt_hash_finish_84_after_12_after_80_4(scrypt_hash_state *S, uint4 *hash4) {
-	// leftover = 5
-	//S->buffer4[0].w = 0x01; // done already in scrypt_hash_update_4_after_12_after_80
+scrypt_hash_finish_80_after_84_4(scrypt_hash_state *S, uint4 *hash4) {
+	uint i;
+	/* Similar to scrypt_hash_finish in scrypt-jane-hash_keccak.h */
+	/* S->leftover = 16 bytes, corresponding to 4 uint */
+	/* Set byte at position 16 to 0x01 */
+	S->buffer4[1].x = 0x01;
+	/* Clear the remaining buffer positions (bytes 17-71) */
+	S->buffer4[1].yzw = (uint3)(0, 0, 0);
 	#pragma unroll
-	for (uint i = 1; i < 4; i++) {
+	for (i = 2; i < 4; i++) {
 		S->buffer4[i] = ZERO;
 	}
+	/* Add the final 0x80000000 to the last byte */
 	S->buffer4[4].xy = (uint2)(0, 0x80000000);
 	
 	keccak_block(S, S->buffer4);
@@ -330,15 +345,54 @@ scrypt_hash_80(uint4 *hash4, const uint4 *m) {
 	scrypt_hash_state st;
 	uint i;
 	
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
 	/* handle the current data */
 	keccak_block_zero(&st, m);
 	in += SCRYPT_HASH_BLOCK_SIZE;
 
+	/* handle leftover data */
+	/* S->leftover = 8 bytes, corresponding to uint2 */
 	{
 		const uint2 *in2 = (const uint2 *) in;
-		st.buffer4[0].xyzw = (uint4)(in2[0].xy, 0x01, 0);
+		st.buffer4[0].xyzw = (uint4)(in2[0].xy, 0x01, 0); // 0x01 is the padding byte
 	}
 
+	/* Similar to scrypt_hash_finish in scrypt-jane-hash_keccak.h */
+	#pragma unroll
+	for (i = 1; i < 4; i++) {
+		st.buffer4[i] = ZERO;
+	}
+	st.buffer4[4].xyzw = (uint4)(0, 0x80000000, 0, 0);
+
+	keccak_block(&st, st.buffer4);
+
+	#pragma unroll
+	for (i = 0; i < 4; i++) {
+		hash4[i] = st.state4[i];
+	}
+}
+
+// New hash function for 84-byte input
+static void
+scrypt_hash_84(uint4 *hash4, const uint4 *m) {
+	const uchar *in = (const uchar *)m;
+	scrypt_hash_state st;
+	uint i;
+	
+	/* Similar to scrypt_hash_update in scrypt-jane-hash_keccak.h */
+	/* handle the current data */
+	keccak_block_zero(&st, m);
+	in += SCRYPT_HASH_BLOCK_SIZE;
+
+	/* handle leftover data */
+	/* S->leftover = 12 bytes, corresponding to 3 uint */
+	{
+		const uint *in_uint = (const uint *) in;
+		st.buffer4[0].xyz = (uint3)(in_uint[0], in_uint[1], in_uint[2]);  // 12 bytes
+		st.buffer4[0].w = 0x01;  // Add padding byte
+	}
+
+	/* Similar to scrypt_hash_finish in scrypt-jane-hash_keccak.h */
 	#pragma unroll
 	for (i = 1; i < 4; i++) {
 		st.buffer4[i] = ZERO;
@@ -387,6 +441,35 @@ scrypt_hmac_init(scrypt_hmac_state *st, const uint4 *key) {
 	scrypt_hash_update_72(&st->outer, pad4);
 }
 
+// New HMAC init function for 84-byte keys
+static void
+scrypt_hmac_init_84(scrypt_hmac_state *st, const uint4 *key) {
+	uint4 pad4[SCRYPT_HASH_BLOCK_SIZE/16 + 1];
+	uint i;
+
+	/* if it's > blocksize bytes, hash it */
+	scrypt_hash_84(pad4, key);
+	pad4[4].xy = ZERO_UINT2;
+
+	/* inner = (key ^ 0x36) */
+	/* h(inner || ...) */
+	#pragma unroll
+	for (i = 0; i < 4; i++) {
+		pad4[i] ^= KEY_0X36;
+	}
+	pad4[4].xy ^= KEY_0X36_2;
+	scrypt_hash_update_72(&st->inner, pad4);
+
+	/* outer = (key ^ 0x5c) */
+	/* h(outer || ...) */
+	#pragma unroll
+	for (i = 0; i < 4; i++) {
+		pad4[i] ^= KEY_0X36_XOR_0X5C;
+	}
+	pad4[4].xy ^= KEY_0X36_XOR_0X5C_2;
+	scrypt_hash_update_72(&st->outer, pad4);
+}
+
 static void
 scrypt_hmac_update_80(scrypt_hmac_state *st, const uint4 *m) {
 	/* h(inner || m...) */
@@ -397,13 +480,6 @@ static void
 scrypt_hmac_update_128(scrypt_hmac_state *st, const uint4 *m) {
 	/* h(inner || m...) */
 	scrypt_hash_update_128(&st->inner, m);
-}
-
-static void
-scrypt_hmac_update_84(scrypt_hmac_state *st, const uint4 *m) {
-	/* h(inner || m...) */
-	scrypt_hash_update_80(&st->inner, m);
-	scrypt_hash_update_4_after_80(&st->inner, m[5].x);
 }
 
 static void
@@ -418,10 +494,17 @@ scrypt_hmac_update_4_after_128(scrypt_hmac_state *st, uint m) {
 	scrypt_hash_update_4_after_128(&st->inner, m);
 }
 
+// New HMAC functions for 84-byte input
+static void
+scrypt_hmac_update_84(scrypt_hmac_state *st, const uint4 *m) {
+	/* h(inner || m...) */
+	scrypt_hash_update_84(&st->inner, m);
+}
+
 static void
 scrypt_hmac_update_4_after_84(scrypt_hmac_state *st, uint m) {
 	/* h(inner || m...) */
-	scrypt_hash_update_4_after_12_after_80(&st->inner, m);
+	scrypt_hash_update_4_after_84(&st->inner, m);
 }
 
 static void
@@ -446,11 +529,12 @@ scrypt_hmac_finish_32B(scrypt_hmac_state *st, uint4 *mac) {
 	scrypt_hash_finish_80_after_64(&st->outer, mac);
 }
 
+// New HMAC finish function for 84-byte input
 static void
-scrypt_hmac_finish_84B(scrypt_hmac_state *st, uint4 *mac) {
+scrypt_hmac_finish_128B_84(scrypt_hmac_state *st, uint4 *mac) {
 	/* h(inner || m) */
 	uint4 innerhash[4];
-	scrypt_hash_finish_84_after_12_after_80_4(&st->inner, innerhash);
+	scrypt_hash_finish_80_after_84_4(&st->inner, innerhash);
 
 	/* h(outer || h(inner || m)) */
 	scrypt_hash_update_64(&st->outer, innerhash);
@@ -539,8 +623,9 @@ scrypt_pbkdf2_32B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		}
 }
 
+// New PBKDF2 functions for 84-byte input
 static void
-scrypt_pbkdf2_84B(const uint4 *password, const uint4 *salt, uint4 *out4) {
+scrypt_pbkdf2_128B_84(const uint4 *password, const uint4 *salt, uint4 *out4) {
 	scrypt_hmac_state hmac_pw, work;
 	uint4 ti4[4];
 	uint i;
@@ -548,16 +633,17 @@ scrypt_pbkdf2_84B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
 
 	/* hmac(password, ...) */
-	scrypt_hmac_init(&hmac_pw, password);
+	scrypt_hmac_init_84(&hmac_pw, password);
 
 	/* hmac(password, salt...) */
 	scrypt_hmac_update_84(&hmac_pw, salt);
 
 		/* U1 = hmac(password, salt || be(i)) */
 		/* U32TO8_BE(be, i); */
+		//work = hmac_pw;
 		scrypt_copy_hmac_state_128B(&work, &hmac_pw);
 		scrypt_hmac_update_4_after_84(&work, be1);
-		scrypt_hmac_finish_84B(&work, ti4);
+		scrypt_hmac_finish_128B_84(&work, ti4);
 
 		#pragma unroll
 		for (i = 0; i < 4; i++) {
@@ -566,8 +652,9 @@ scrypt_pbkdf2_84B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		
 		/* U1 = hmac(password, salt || be(i)) */
 		/* U32TO8_BE(be, i); */
+		// work = hmac_pw;
 		scrypt_hmac_update_4_after_84(&hmac_pw, be2);
-		scrypt_hmac_finish_84B(&hmac_pw, ti4);
+		scrypt_hmac_finish_128B_84(&hmac_pw, ti4);
 
 		#pragma unroll
 		for (i = 0; i < 4; i++) {
@@ -816,12 +903,13 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 		SETFOUND(gid);
 }
 
+// New kernel for 84-byte block header (with 8-byte timestamp)
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84(__global const uint4 * restrict input,
 volatile __global uint * restrict output, __global uchar * restrict padcache,
 const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 {
-	uint4 password[6];  // 6 uint4s = 24 bytes, but we only use 21 bytes (84 bytes total)
+	uint4 password[6];  // Need 6 uint4 for 84 bytes (84/16 = 5.25, so 6 uint4)
 	uint4 X[8];
 	uint output_hash[8] __attribute__ ((aligned (16)));
 	const uint gid = get_global_id(0);
@@ -834,16 +922,17 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 		Nfactor++;
 	}
 	
-	password[0] = input[0];
-	password[1] = input[1];
-	password[2] = input[2];
-	password[3] = input[3];
-	password[4] = input[4];
-	password[5] = input[5];
-	password[5].x = gid;  // Nonce is now in password[5].x (80th byte)
+	// Copy 84 bytes (5.25 uint4) from input
+	password[0] = input[0];  // bytes 0-15
+	password[1] = input[1];  // bytes 16-31
+	password[2] = input[2];  // bytes 32-47
+	password[3] = input[3];  // bytes 48-63
+	password[4] = input[4];  // bytes 64-79
+	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
+	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
 	
-	/* 1: X = PBKDF2(password, salt) */
-	scrypt_pbkdf2_84B(password, password, X);
+	/* 1: X = PBKDF2(password, salt) - using 84-byte version */
+	scrypt_pbkdf2_128B_84(password, password, X);
 
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
