@@ -1797,30 +1797,14 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	cl_event kernel_event = NULL;
 	cl_event read_event = NULL;
 	cl_event write_event = NULL;
-	// For split kernels: track intermediate events for proper cleanup and profiling
-	cl_event split_event_part1 = NULL;
-	cl_event split_event_part2 = NULL;
 	cl_ulong kernel_start_time = 0, kernel_end_time = 0;
-	cl_ulong read_start_time = 0, read_end_time = 0;
-	cl_ulong write_start_time = 0, write_end_time = 0;
 	cl_ulong kernel_execution_time = 0;
-	cl_ulong total_execution_time = 0;
 	
 	// Split kernel profiling variables
 	cl_ulong part1_start = 0, part1_end = 0, part1_time = 0;
 	cl_ulong part2_start = 0, part2_end = 0, part2_time = 0;
 	cl_ulong part3_start = 0, part3_end = 0, part3_time = 0;
 	cl_ulong gap_1_to_2 = 0, gap_2_to_3 = 0;
-	
-	static int profiling_counter = 0;
-	static double avg_kernel_time = 0.0;
-	static double avg_total_time = 0.0;
-	// Per-part averages for split kernels
-	static double avg_part1_time = 0.0;
-	static double avg_part2_time = 0.0;
-	static double avg_part3_time = 0.0;
-	static double avg_gap_1_to_2 = 0.0;
-	static double avg_gap_2_to_3 = 0.0;
 	
 	// Fallback timing mechanism
 	struct timeval start_time, end_time;
@@ -1855,11 +1839,8 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 #endif
 	
 	if (use_split) {
-		// ===== SPLIT KERNEL EXECUTION =====
+		// ===== SPLIT KERNEL EXECUTION (Sequential: wait, profile, then next) =====
 		cl_event event_part1 = NULL, event_part2 = NULL, event_part3 = NULL;
-		// Store references for cleanup later
-		split_event_part1 = NULL;
-		split_event_part2 = NULL;
 		unsigned int num = 0;
 		cl_uint le_target = *(cl_uint *)(work->target + 28);
 		
@@ -1915,6 +1896,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			return -1;
 		}
 		
+		// ===== PART 1: Launch, Wait, Profile =====
 		// Set arguments for Part 1: (input, temp_X)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part1, num++, sizeof(cl_mem), &clState->CLbuffer0);
@@ -1924,7 +1906,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			return -1;
 		}
 		
-		// Launch Part 1
+		// Launch Part 1 (no wait list - we'll wait explicitly)
 		if (clState->goffset) {
 			size_t global_work_offset[1] = { work->blk.nonce };
 			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part1, 1, 
@@ -1940,6 +1922,35 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			return -1;
 		}
 		
+		// Wait for Part 1 to complete
+		status = clWaitForEvents(1, &event_part1);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clWaitForEvents for Part 1 failed.", status);
+			clReleaseEvent(event_part1);
+			return -1;
+		}
+		
+		// Profile Part 1 immediately after completion
+		status = clGetEventProfilingInfo(event_part1, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part1_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(event_part1, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part1_end, NULL);
+			if (status == CL_SUCCESS) {
+				part1_time = part1_end - part1_start;
+				double part1_ms = part1_time / 1000000.0;
+				applog(LOG_INFO, "GPU %d Split Kernel Part 1 (PBKDF2) completed: %.3fms", gpu->device_id, part1_ms);
+			} else {
+				applog(LOG_WARNING, "GPU %d Split Kernel Part 1: Failed to get profiling end time", gpu->device_id);
+			}
+		} else {
+			applog(LOG_WARNING, "GPU %d Split Kernel Part 1: Failed to get profiling start time", gpu->device_id);
+		}
+		
+		// Clean up event_part1 after profiling
+		clReleaseEvent(event_part1);
+		
+		// ===== PART 2: Launch, Wait, Profile =====
 		// Set arguments for Part 2: (temp_X input, temp_X2 output, padcache)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X_buffer);
@@ -1947,27 +1958,63 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8);
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: clSetKernelArg Part 2 failed.", status);
-			clReleaseEvent(event_part1);
 			return -1;
 		}
 		
-		// Launch Part 2 (wait for Part 1)
+		// Launch Part 2 (no wait list - we'll wait explicitly)
 		if (clState->goffset) {
 			size_t global_work_offset[1] = { work->blk.nonce };
 			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part2, 1, 
 			                                global_work_offset, globalThreads, localThreads,
-			                                1, &event_part1, &event_part2);
+			                                0, NULL, &event_part2);
 		} else {
 			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part2, 1, NULL,
-			                                globalThreads, localThreads, 1, &event_part1, &event_part2);
+			                                globalThreads, localThreads, 0, NULL, &event_part2);
 		}
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: Enqueueing kernel Part 2 failed.", status);
-			clReleaseEvent(event_part1);
 			if (event_part2) clReleaseEvent(event_part2);
 			return -1;
 		}
 		
+		// Wait for Part 2 to complete
+		status = clWaitForEvents(1, &event_part2);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clWaitForEvents for Part 2 failed.", status);
+			clReleaseEvent(event_part2);
+			return -1;
+		}
+		
+		// Profile Part 2 immediately after completion
+		status = clGetEventProfilingInfo(event_part2, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part2_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(event_part2, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part2_end, NULL);
+			if (status == CL_SUCCESS) {
+				part2_time = part2_end - part2_start;
+				double part2_ms = part2_time / 1000000.0;
+				
+				// Calculate gap between Part 1 and Part 2
+				if (part1_end > 0 && part2_start > 0) {
+					gap_1_to_2 = part2_start - part1_end;
+					double gap_ms = gap_1_to_2 / 1000000.0;
+					applog(LOG_INFO, "GPU %d Split Kernel Part 2 (ROMix) completed: %.3fms (Gap 1->2: %.3fms)", 
+					       gpu->device_id, part2_ms, gap_ms);
+				} else {
+					applog(LOG_INFO, "GPU %d Split Kernel Part 2 (ROMix) completed: %.3fms", gpu->device_id, part2_ms);
+				}
+			} else {
+				applog(LOG_WARNING, "GPU %d Split Kernel Part 2: Failed to get profiling end time", gpu->device_id);
+			}
+		} else {
+			applog(LOG_WARNING, "GPU %d Split Kernel Part 2: Failed to get profiling start time", gpu->device_id);
+		}
+		
+		// Clean up event_part2 after profiling
+		clReleaseEvent(event_part2);
+		
+		// ===== PART 3: Launch, Wait, Profile =====
 		// Set arguments for Part 3: (input, temp_X2, output, target)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->CLbuffer0);
@@ -1976,38 +2023,66 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_uint), &le_target);
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: clSetKernelArg Part 3 failed.", status);
-			clReleaseEvent(event_part1);
-			clReleaseEvent(event_part2);
 			return -1;
 		}
 		
-		// Launch Part 3 (wait for Part 2)
+		// Launch Part 3 (no wait list - we'll wait explicitly)
 		if (clState->goffset) {
 			size_t global_work_offset[1] = { work->blk.nonce };
 			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part3, 1, 
 			                                global_work_offset, globalThreads, localThreads,
-			                                1, &event_part2, &event_part3);
+			                                0, NULL, &event_part3);
 		} else {
 			status = clEnqueueNDRangeKernel(clState->commandQueue, clState->kernel_part3, 1, NULL,
-			                                globalThreads, localThreads, 1, &event_part2, &event_part3);
+			                                globalThreads, localThreads, 0, NULL, &event_part3);
 		}
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: Enqueueing kernel Part 3 failed.", status);
-			clReleaseEvent(event_part1);
-			clReleaseEvent(event_part2);
 			if (event_part3) clReleaseEvent(event_part3);
 			return -1;
 		}
 		
-		// Use event_part3 as the main kernel event for profiling
+		// Wait for Part 3 to complete
+		status = clWaitForEvents(1, &event_part3);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clWaitForEvents for Part 3 failed.", status);
+			clReleaseEvent(event_part3);
+			return -1;
+		}
+		
+		// Profile Part 3 immediately after completion
+		status = clGetEventProfilingInfo(event_part3, CL_PROFILING_COMMAND_START,
+		                                sizeof(cl_ulong), &part3_start, NULL);
+		if (status == CL_SUCCESS) {
+			status = clGetEventProfilingInfo(event_part3, CL_PROFILING_COMMAND_END,
+			                                sizeof(cl_ulong), &part3_end, NULL);
+			if (status == CL_SUCCESS) {
+				part3_time = part3_end - part3_start;
+				double part3_ms = part3_time / 1000000.0;
+				
+				// Calculate gap between Part 2 and Part 3
+				if (part2_end > 0 && part3_start > 0) {
+					gap_2_to_3 = part3_start - part2_end;
+					double gap_ms = gap_2_to_3 / 1000000.0;
+					double total_ms = (part1_time + part2_time + part3_time) / 1000000.0;
+					applog(LOG_INFO, "GPU %d Split Kernel Part 3 (Final) completed: %.3fms (Gap 2->3: %.3fms) | Total kernel time: %.3fms", 
+					       gpu->device_id, part3_ms, gap_ms, total_ms);
+				} else {
+					double total_ms = (part1_time + part2_time + part3_time) / 1000000.0;
+					applog(LOG_INFO, "GPU %d Split Kernel Part 3 (Final) completed: %.3fms | Total kernel time: %.3fms", 
+					       gpu->device_id, part3_ms, total_ms);
+				}
+			} else {
+				applog(LOG_WARNING, "GPU %d Split Kernel Part 3: Failed to get profiling end time", gpu->device_id);
+			}
+		} else {
+			applog(LOG_WARNING, "GPU %d Split Kernel Part 3: Failed to get profiling start time", gpu->device_id);
+		}
+		
+		// Use event_part3 as the main kernel event for compatibility with read buffer
 		kernel_event = event_part3;
 		
-		// Store references to intermediate events for cleanup and profiling after clFinish()
-		// (OpenCL command queue maintains its own references via wait lists)
-		split_event_part1 = event_part1;
-		split_event_part2 = event_part2;
-		
-		applog(LOG_DEBUG, "Split kernels executed (Part 1 -> 2 -> 3)");
+		applog(LOG_DEBUG, "Split kernels executed sequentially (Part 1 -> wait/profile -> Part 2 -> wait/profile -> Part 3 -> wait/profile)");
 	} else {
 		// ===== MONOLITHIC KERNEL EXECUTION =====
 		status = thrdata->queue_kernel_parameters(clState, &work->blk, globalThreads[0]);
@@ -2033,16 +2108,56 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			if (kernel_event) clReleaseEvent(kernel_event);
 			return -1;
 		}
+		
+		// Wait for monolithic kernel to complete
+		status = clWaitForEvents(1, &kernel_event);
+		if (unlikely(status != CL_SUCCESS)) {
+			applog(LOG_ERR, "Error %d: clWaitForEvents for monolithic kernel failed.", status);
+			clReleaseEvent(kernel_event);
+			return -1;
+		}
+		
+		// Get end time for fallback timing
+		gettimeofday(&end_time, NULL);
+		
+		// ===== MONOLITHIC KERNEL PROFILING =====
+		// Try to get profiling information for monolithic kernels
+		bool profiling_success = false;
+		if (kernel_event) {
+			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, 
+							sizeof(cl_ulong), &kernel_start_time, NULL);
+			if (status == CL_SUCCESS) {
+				status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, 
+							sizeof(cl_ulong), &kernel_end_time, NULL);
+				if (status == CL_SUCCESS) {
+					kernel_execution_time = kernel_end_time - kernel_start_time;
+					profiling_success = true;
+				} else {
+					applog(LOG_WARNING, "GPU %d Monolithic Kernel: Failed to get profiling end time", gpu->device_id);
+				}
+			} else {
+				applog(LOG_WARNING, "GPU %d Monolithic Kernel: Failed to get profiling start time", gpu->device_id);
+			}
+		}
+		
+		// Use fallback timing if OpenCL profiling failed
+		if (!profiling_success) {
+			long fallback_time_us = (end_time.tv_sec - start_time.tv_sec) * 1000000 + 
+						(end_time.tv_usec - start_time.tv_usec);
+			kernel_execution_time = fallback_time_us * 1000; // Convert to nanoseconds
+		}
+		
+		// Log kernel completion time
+		double kernel_time_ms = kernel_execution_time / 1000000.0;
+		applog(LOG_INFO, "GPU %d Monolithic Kernel completed%s: %.3fms", 
+		       gpu->device_id, profiling_success ? "" : " (fallback)", kernel_time_ms);
 	}
 
-	// Enqueue read buffer with profiling (wait for kernel to complete)
-	// For split kernels, kernel_event is event_part3; for monolithic, it's the kernel event
-	// This ensures we don't read results before the kernels finish executing
-	const cl_event *wait_list = kernel_event ? &kernel_event : NULL;
-	const cl_uint num_wait_events = kernel_event ? 1 : 0;
+	// Enqueue read buffer with profiling
+	// Both split and monolithic kernels are already complete (we waited for them), so no wait needed
 	status = clEnqueueReadBuffer(clState->commandQueue, clState->outputBuffer, CL_FALSE, 0,
 				     buffersize, thrdata->res, 
-				     num_wait_events, wait_list, 
+				     0, NULL, 
 				     &read_event);
 	if (unlikely(status != CL_SUCCESS)) {
 		applog(LOG_ERR, "Error: clEnqueueReadBuffer failed error %d. (clEnqueueReadBuffer)", status);
@@ -2075,186 +2190,6 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	/* This finish flushes the readbuffer set with CL_FALSE in clEnqueueReadBuffer */
 	clFinish(clState->commandQueue);
 
-	// Get end time for fallback timing
-	gettimeofday(&end_time, NULL);
-	
-	// Get profiling information
-	if (kernel_event) {
-		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, 
-						sizeof(cl_ulong), &kernel_start_time, NULL);
-		if (status == CL_SUCCESS) {
-			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, 
-							sizeof(cl_ulong), &kernel_end_time, NULL);
-			if (status == CL_SUCCESS) {
-				kernel_execution_time = kernel_end_time - kernel_start_time;
-			}
-		}
-	}
-
-	if (read_event) {
-		status = clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_START, 
-						sizeof(cl_ulong), &read_start_time, NULL);
-		if (status == CL_SUCCESS) {
-			status = clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_END, 
-							sizeof(cl_ulong), &read_end_time, NULL);
-			if (status == CL_SUCCESS) {
-				total_execution_time = read_end_time - kernel_start_time;
-			}
-		}
-	}
-	
-	// Get detailed profiling for split kernels (Part 1, 2, 3 separately)
-	if (use_split && split_event_part1 && split_event_part2 && kernel_event) {
-		// Profile Part 1
-		status = clGetEventProfilingInfo(split_event_part1, CL_PROFILING_COMMAND_START,
-		                                sizeof(cl_ulong), &part1_start, NULL);
-		if (status == CL_SUCCESS) {
-			status = clGetEventProfilingInfo(split_event_part1, CL_PROFILING_COMMAND_END,
-			                                sizeof(cl_ulong), &part1_end, NULL);
-			if (status == CL_SUCCESS) {
-				part1_time = part1_end - part1_start;
-			}
-		}
-		
-		// Profile Part 2
-		status = clGetEventProfilingInfo(split_event_part2, CL_PROFILING_COMMAND_START,
-		                                sizeof(cl_ulong), &part2_start, NULL);
-		if (status == CL_SUCCESS) {
-			status = clGetEventProfilingInfo(split_event_part2, CL_PROFILING_COMMAND_END,
-			                                sizeof(cl_ulong), &part2_end, NULL);
-			if (status == CL_SUCCESS) {
-				part2_time = part2_end - part2_start;
-			}
-		}
-		
-		// Profile Part 3 (kernel_event)
-		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START,
-		                                sizeof(cl_ulong), &part3_start, NULL);
-		if (status == CL_SUCCESS) {
-			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END,
-			                                sizeof(cl_ulong), &part3_end, NULL);
-			if (status == CL_SUCCESS) {
-				part3_time = part3_end - part3_start;
-			}
-		}
-		
-		// Calculate gaps between kernels (overhead/synchronization time)
-		if (part1_end > 0 && part2_start > 0) {
-			gap_1_to_2 = part2_start - part1_end;
-		}
-		if (part2_end > 0 && part3_start > 0) {
-			gap_2_to_3 = part3_start - part2_end;
-		}
-	}
-	
-	// Use fallback timing if OpenCL profiling failed
-	if (kernel_execution_time == 0) {
-		long fallback_time_us = (end_time.tv_sec - start_time.tv_sec) * 1000000 + 
-					(end_time.tv_usec - start_time.tv_usec);
-		kernel_execution_time = fallback_time_us * 1000; // Convert to nanoseconds
-		total_execution_time = kernel_execution_time;
-	}
-
-	// Calculate averages and log profiling info every iteration
-	profiling_counter++;
-	if (profiling_counter == 1) {
-		avg_kernel_time = kernel_execution_time;
-		avg_total_time = total_execution_time;
-		if (use_split) {
-			avg_part1_time = part1_time;
-			avg_part2_time = part2_time;
-			avg_part3_time = part3_time;
-			avg_gap_1_to_2 = gap_1_to_2;
-			avg_gap_2_to_3 = gap_2_to_3;
-		}
-	} else {
-		avg_kernel_time = (avg_kernel_time * (profiling_counter - 1) + kernel_execution_time) / profiling_counter;
-		avg_total_time = (avg_total_time * (profiling_counter - 1) + total_execution_time) / profiling_counter;
-		if (use_split) {
-			avg_part1_time = (avg_part1_time * (profiling_counter - 1) + part1_time) / profiling_counter;
-			avg_part2_time = (avg_part2_time * (profiling_counter - 1) + part2_time) / profiling_counter;
-			avg_part3_time = (avg_part3_time * (profiling_counter - 1) + part3_time) / profiling_counter;
-			avg_gap_1_to_2 = (avg_gap_1_to_2 * (profiling_counter - 1) + gap_1_to_2) / profiling_counter;
-			avg_gap_2_to_3 = (avg_gap_2_to_3 * (profiling_counter - 1) + gap_2_to_3) / profiling_counter;
-		}
-	}
-
-	// Log profiling info every iteration
-	double kernel_time_ms = kernel_execution_time / 1000000.0; // Convert ns to ms
-	double total_time_ms = total_execution_time / 1000000.0;
-	double avg_kernel_ms = avg_kernel_time / 1000000.0;
-	double avg_total_ms = avg_total_time / 1000000.0;
-	
-	// Calculate memory bandwidth and occupancy estimates
-	size_t memory_transferred = buffersize + (opt_scrypt_chacha_84 ? 84 : 80);
-	double bandwidth_gbps = 0.0;
-	if (total_time_ms > 0.001) { // Avoid division by very small numbers
-		bandwidth_gbps = (memory_transferred / (total_time_ms / 1000.0)) / (1024.0 * 1024.0 * 1024.0);
-	}
-	
-	// Estimate occupancy based on work group size and execution time
-	double estimated_occupancy = (localThreads[0] * 100.0) / 64.0; // Assuming 64 work items per CU
-	if (estimated_occupancy > 100.0) estimated_occupancy = 100.0;
-	
-	// Determine timing method used
-	const char* timing_method = (kernel_start_time == 0) ? " [Fallback]" : " [OpenCL]";
-	
-	// Log detailed split kernel profiling if enabled
-	if (use_split && part1_time > 0 && part2_time > 0 && part3_time > 0) {
-		double part1_ms = part1_time / 1000000.0;
-		double part2_ms = part2_time / 1000000.0;
-		double part3_ms = part3_time / 1000000.0;
-		double gap_1_to_2_ms = gap_1_to_2 / 1000000.0;
-		double gap_2_to_3_ms = gap_2_to_3 / 1000000.0;
-		double total_split_ms = part1_ms + part2_ms + part3_ms + gap_1_to_2_ms + gap_2_to_3_ms;
-		
-		double avg_part1_ms = avg_part1_time / 1000000.0;
-		double avg_part2_ms = avg_part2_time / 1000000.0;
-		double avg_part3_ms = avg_part3_time / 1000000.0;
-		double avg_gap_1_to_2_ms = avg_gap_1_to_2 / 1000000.0;
-		double avg_gap_2_to_3_ms = avg_gap_2_to_3 / 1000000.0;
-		double avg_total_split_ms = avg_part1_ms + avg_part2_ms + avg_part3_ms + avg_gap_1_to_2_ms + avg_gap_2_to_3_ms;
-		
-		// Calculate percentage breakdown
-		double part1_pct = (part1_ms / total_split_ms) * 100.0;
-		double part2_pct = (part2_ms / total_split_ms) * 100.0;
-		double part3_pct = (part3_ms / total_split_ms) * 100.0;
-		double gap_pct = ((gap_1_to_2_ms + gap_2_to_3_ms) / total_split_ms) * 100.0;
-		
-		applog(LOG_INFO, "GPU %d Split Kernel Profiling [%d]:", gpu->device_id, profiling_counter);
-		applog(LOG_INFO, "  Part 1 (PBKDF2):    %.3fms (avg: %.3fms) [%.1f%%]",
-		       part1_ms, avg_part1_ms, part1_pct);
-		applog(LOG_INFO, "  Part 2 (ROMix):     %.3fms (avg: %.3fms) [%.1f%%]",
-		       part2_ms, avg_part2_ms, part2_pct);
-		applog(LOG_INFO, "  Part 3 (Final):     %.3fms (avg: %.3fms) [%.1f%%]",
-		       part3_ms, avg_part3_ms, part3_pct);
-		applog(LOG_INFO, "  Gap 1→2:            %.3fms (avg: %.3fms) - kernel launch overhead",
-		       gap_1_to_2_ms, avg_gap_1_to_2_ms);
-		applog(LOG_INFO, "  Gap 2→3:            %.3fms (avg: %.3fms) - kernel launch overhead",
-		       gap_2_to_3_ms, avg_gap_2_to_3_ms);
-		applog(LOG_INFO, "  Total kernel time:  %.3fms (avg: %.3fms) | Overhead: %.3fms (%.1f%%)",
-		       total_split_ms, avg_total_split_ms, gap_1_to_2_ms + gap_2_to_3_ms, gap_pct);
-		applog(LOG_INFO, "  End-to-end:         %.3fms (avg: %.3fms) - includes read buffer",
-		       total_time_ms, avg_total_ms);
-	} else {
-		// Monolithic kernel profiling (original)
-		applog(LOG_INFO, "GPU %d Profiling [%d]: Kernel: %.2fms (avg: %.2fms), Total: %.2fms (avg: %.2fms), "
-		       "Work Items: %lu, Memory: %.2fGB/s, Est. Occupancy: %.1f%%, Private Mem: ~2.4KB/workitem%s",
-		       gpu->device_id, profiling_counter, kernel_time_ms, avg_kernel_ms, total_time_ms, avg_total_ms,
-		       (unsigned long)globalThreads[0], bandwidth_gbps, estimated_occupancy, timing_method);
-	}
-	
-	// Check for potential memory spilling indicators
-	if (kernel_time_ms > avg_kernel_ms * 1.5) {
-		applog(LOG_WARNING, "GPU %d: Kernel execution time spike detected (%.2fms vs avg %.2fms) - possible memory spilling",
-		       gpu->device_id, kernel_time_ms, avg_kernel_ms);
-	}
-	
-	if (estimated_occupancy < 25.0) {
-		applog(LOG_WARNING, "GPU %d: Low estimated occupancy (%.1f%%) - consider reducing private memory usage",
-		       gpu->device_id, estimated_occupancy);
-	}
-
 	/* FOUND entry is used as a counter to say how many nonces exist */
 	if (thrdata->res[found]) {
 		/* Clear the buffer again */
@@ -2278,12 +2213,6 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	if (kernel_event) clReleaseEvent(kernel_event);
 	if (read_event) clReleaseEvent(read_event);
 	if (write_event) clReleaseEvent(write_event);
-	
-	// Clean up split kernel intermediate events (they're only needed for dependency chaining)
-	if (use_split) {
-		if (split_event_part1) clReleaseEvent(split_event_part1);
-		if (split_event_part2) clReleaseEvent(split_event_part2);
-	}
 
 	return hashes;
 }
