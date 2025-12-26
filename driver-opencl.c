@@ -1814,7 +1814,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 
 		global_work_offset[0] = work->blk.nonce;
 		if (opt_scrypt_chacha)
-		applog(LOG_DEBUG, "Nonce: %d, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
+		applog(LOG_DEBUG, "Nonce: %u, Global work size: %lu, local work size: %lu", work->blk.nonce, (unsigned long)globalThreads[0], (unsigned long)localThreads[0]);
 		status = clEnqueueNDRangeKernel(clState->commandQueue, *kernel, 1, global_work_offset,
 						globalThreads, localThreads, 0,  NULL, NULL);
 	} else
@@ -1836,7 +1836,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	{
 		uint32_t *o = thrdata->res;
 		uint32_t target = *(uint32_t *)(work->target + 28);
-		applog(LOG_DEBUG, "Nonce: %x, Output buffer: %x %x %x %x %x %x %x %x Target: %x", work->blk.nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], target);
+		applog(LOG_DEBUG, "Nonce: %u, Output buffer: %x %x %x %x %x %x %x %x Target: %x", work->blk.nonce, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], target);
 	}
 	
 	/* The amount of work scanned can fluctuate when intensity changes
