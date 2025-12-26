@@ -864,10 +864,54 @@ built:
 
 	/* get a kernel object handle for a kernel with the given name */
 	const char *kernel_name = (opt_scrypt_chacha_84) ? "search84" : "search";
-	clState->kernel = clCreateKernel(clState->program, kernel_name, &status);
-	if (status != CL_SUCCESS) {
-		applog(LOG_ERR, "Error %d: Creating Kernel from program. (clCreateKernel)", status);
-		return NULL;
+	
+	// Determine if we should use split kernels
+	clState->use_split_kernels = false;
+#ifdef USE_SCRYPT
+	if (opt_scrypt_split_kernels && opt_scrypt_chacha_84) {
+		clState->use_split_kernels = true;
+		applog(LOG_INFO, "Using split kernel mode for reduced register pressure");
+	}
+#endif
+	
+	if (clState->use_split_kernels) {
+		// Create three separate kernels for split execution
+		clState->kernel_part1 = clCreateKernel(clState->program, "search84_part1", &status);
+		if (status != CL_SUCCESS) {
+			applog(LOG_ERR, "Error %d: Creating Kernel Part 1. (clCreateKernel)", status);
+			return NULL;
+		}
+		
+		clState->kernel_part2 = clCreateKernel(clState->program, "search84_part2", &status);
+		if (status != CL_SUCCESS) {
+			applog(LOG_ERR, "Error %d: Creating Kernel Part 2. (clCreateKernel)", status);
+			clReleaseKernel(clState->kernel_part1);
+			return NULL;
+		}
+		
+		clState->kernel_part3 = clCreateKernel(clState->program, "search84_part3", &status);
+		if (status != CL_SUCCESS) {
+			applog(LOG_ERR, "Error %d: Creating Kernel Part 3. (clCreateKernel)", status);
+			clReleaseKernel(clState->kernel_part1);
+			clReleaseKernel(clState->kernel_part2);
+			return NULL;
+		}
+		
+		// Also create monolithic kernel as fallback (stored in clState->kernel)
+		clState->kernel = clCreateKernel(clState->program, kernel_name, &status);
+		if (status != CL_SUCCESS) {
+			applog(LOG_WARNING, "Could not create fallback kernel, continuing with split kernels only");
+			clState->kernel = NULL;
+		}
+		
+		applog(LOG_INFO, "Split kernels created successfully (Part 1, 2, 3)");
+	} else {
+		// Create single monolithic kernel
+		clState->kernel = clCreateKernel(clState->program, kernel_name, &status);
+		if (status != CL_SUCCESS) {
+			applog(LOG_ERR, "Error %d: Creating Kernel from program. (clCreateKernel)", status);
+			return NULL;
+		}
 	}
 
 #ifdef USE_SCRYPT
@@ -923,6 +967,27 @@ built:
 			return NULL;
 		}
 		clState->outputBuffer = clCreateBuffer(clState->context, CL_MEM_WRITE_ONLY, SCRYPT_BUFFERSIZE, NULL, &status);
+		
+		// Create temp_X buffer for split kernels if enabled
+		if (clState->use_split_kernels) {
+			// temp_X needs to hold 8 uint4 values per thread
+			// Size = thread_concurrency * 8 * sizeof(cl_uint4)
+			size_t temp_X_size = cgpu->thread_concurrency * 8 * sizeof(cl_uint4);
+			applog(LOG_INFO, "Creating temp_X buffer of %lu bytes (%lu MB) for split kernels",
+			       (unsigned long)temp_X_size, (unsigned long)(temp_X_size / (1024 * 1024)));
+			
+			clState->temp_X_buffer = clCreateBuffer(clState->context, CL_MEM_READ_WRITE, 
+			                                        temp_X_size, NULL, &status);
+			if (status != CL_SUCCESS) {
+				applog(LOG_ERR, "Error %d: clCreateBuffer (temp_X_buffer), size: %lu bytes", 
+				       status, (unsigned long)temp_X_size);
+				applog(LOG_ERR, "Try reducing thread concurrency or disabling split kernels");
+				return NULL;
+			}
+			applog(LOG_INFO, "temp_X buffer created successfully");
+		} else {
+			clState->temp_X_buffer = NULL;
+		}
 	} else
 #endif
 	clState->outputBuffer = clCreateBuffer(clState->context, CL_MEM_WRITE_ONLY, BUFFERSIZE, NULL, &status);

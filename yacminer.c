@@ -113,6 +113,7 @@ int gpu_threads;
 bool opt_scrypt=1;
 bool opt_scrypt_chacha=0;
 bool opt_scrypt_chacha_84=0;
+bool opt_scrypt_split_kernels=false;
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
@@ -1392,6 +1393,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt-chacha-84",
 			set_scrypt_chacha_84, NULL,
 			"Use the scrypt-chacha algorithm for mining with 84-byte block headers (8-byte timestamp)"),
+	OPT_WITHOUT_ARG("--scrypt-split-kernels",
+			opt_set_bool, &opt_scrypt_split_kernels,
+			"Use split kernels to reduce register pressure (for scrypt-chacha-84 only, reduces spills by ~35-46)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),
