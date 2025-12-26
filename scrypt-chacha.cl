@@ -1051,20 +1051,21 @@ __kernel void search84_part1(
 }
 
 // Part 2: ROMix
-// Computes: X → X', loads X from global, stores result back
+// Computes: X → X', loads X from temp_X, stores result to temp_X2
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part2(
-	__global uint4 * restrict temp_X,      // X from part1, will be updated
+	__global const uint4 * restrict temp_X,      // X from part1 (read-only)
+	__global uint4 * restrict temp_X2,           // X' after ROMix (write-only)
 	__global uchar * restrict padcache)
 {
 	uint4 X[8];
 	const uint gid = get_global_id(0);
-	// Calculate local work item index (0 to num_work_items-1) for temp_X buffer indexing
+	// Calculate local work item index (0 to num_work_items-1) for buffer indexing
 	// This works correctly even when global_work_offset is used
 	const uint tid = get_group_id(0) * get_local_size(0) + get_local_id(0);
 	const uint offset = tid * 8;
 	
-	// Load X from global memory
+	// Load X from global memory (from Part 1)
 	#pragma unroll
 	for (uint i = 0; i < 8; i++) {
 		X[i] = temp_X[offset + i];
@@ -1074,10 +1075,11 @@ __kernel void search84_part2(
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, gid);
 	
-	// Store updated X back to global memory
+	// Store updated X to separate buffer (avoids overwriting Part 1's output)
+	// This write to a new location may improve performance vs overwriting temp_X
 	#pragma unroll
 	for (uint i = 0; i < 8; i++) {
-		temp_X[offset + i] = X[i];
+		temp_X2[offset + i] = X[i];
 	}
 	
 	// Kernel ends: X[8] and W[8] freed
@@ -1088,7 +1090,7 @@ __kernel void search84_part2(
 __attribute__((reqd_work_group_size(WORKSIZE, 1, 1)))
 __kernel void search84_part3(
 	__global const uint4 * restrict input,
-	__global const uint4 * restrict temp_X,  // X from part2
+	__global const uint4 * restrict temp_X2,  // X from part2 (ROMix output)
 	volatile __global uint * restrict output,
 	const uint target)
 {
@@ -1111,10 +1113,10 @@ __kernel void search84_part3(
 	password[5] = input[5];  // bytes 80-95 (only first 4 bytes used for block header)
 	password[5].x = gid;     // Set nonce in bytes 80-83 (correct nonce position)
 	
-	// Load X from global memory
+	// Load X from global memory (from Part 2's output)
 	#pragma unroll
 	for (uint i = 0; i < 8; i++) {
-		X[i] = temp_X[offset + i];
+		X[i] = temp_X2[offset + i];
 	}
 	
 	// Final PBKDF2

@@ -1927,9 +1927,10 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			return -1;
 		}
 		
-		// Set arguments for Part 2: (temp_X, padcache)
+		// Set arguments for Part 2: (temp_X input, temp_X2 output, padcache)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X_buffer);
+		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->temp_X2_buffer);
 		status |= clSetKernelArg(clState->kernel_part2, num++, sizeof(cl_mem), &clState->padbuffer8);
 		if (unlikely(status != CL_SUCCESS)) {
 			applog(LOG_ERR, "Error %d: clSetKernelArg Part 2 failed.", status);
@@ -1954,10 +1955,10 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 			return -1;
 		}
 		
-		// Set arguments for Part 3: (input, temp_X, output, target)
+		// Set arguments for Part 3: (input, temp_X2, output, target)
 		num = 0;
 		status = clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->CLbuffer0);
-		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->temp_X_buffer);
+		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->temp_X2_buffer);
 		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_mem), &clState->outputBuffer);
 		status |= clSetKernelArg(clState->kernel_part3, num++, sizeof(cl_uint), &le_target);
 		if (unlikely(status != CL_SUCCESS)) {
@@ -2188,6 +2189,7 @@ static void opencl_thread_shutdown(struct thr_info *thr)
 		if (clState->kernel_part2) clReleaseKernel(clState->kernel_part2);
 		if (clState->kernel_part3) clReleaseKernel(clState->kernel_part3);
 		if (clState->temp_X_buffer) clReleaseMemObject(clState->temp_X_buffer);
+		if (clState->temp_X2_buffer) clReleaseMemObject(clState->temp_X2_buffer);
 		applog(LOG_DEBUG, "Released split kernel resources");
 	}
 #endif
