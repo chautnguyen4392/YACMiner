@@ -6002,7 +6002,9 @@ bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce)
 	rebuild_hash(work);
 	flip32(hash2_32, work->hash);
 
-	diff1targ = opt_scrypt ? 0x0000ffffUL : 0;
+	diff1targ = le32toh(*(uint32_t *)(work->target + 28));
+	applog(LOG_DEBUG, "Target validation: hash=%08x target=%08x", be32toh(hash2_32[7]), diff1targ);
+	
 	if (be32toh(hash2_32[7]) > diff1targ) {
 		applog(LOG_INFO, "%s%d: invalid nonce - HW error",
 		       thr->cgpu->drv->name, thr->cgpu->device_id);
