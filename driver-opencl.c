@@ -1365,23 +1365,28 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 //static void set_threads_hashes(unsigned int vectors,int64_t *hashes, size_t *globalThreads,
 //			       unsigned int minthreads, __maybe_unused int *intensity)
 static void set_threads_hashes(unsigned int vectors, unsigned int compute_shaders, int64_t *hashes, size_t *globalThreads,
-					unsigned int minthreads, __maybe_unused int *intensity, __maybe_unused int *xintensity, __maybe_unused int *rawintensity)
+					unsigned int minthreads, __maybe_unused int *intensity, __maybe_unused int *xintensity, __maybe_unused int *rawintensity, size_t opt_tc)
 {
 	unsigned int threads = 0;
 
-	while (threads < minthreads) {
-		if (*rawintensity > 0) {
-			threads = *rawintensity;
-		} else if (*xintensity > 0) {
-			threads = compute_shaders * *xintensity;
-		} else {
-			threads = 1 << *intensity;
-		}
-		if (threads < minthreads) {
-			if (likely(*intensity < MAX_INTENSITY))
-				(*intensity)++;
-			else
-				threads = minthreads;
+	/* Use thread-concurrency if set, otherwise use intensity-based calculation */
+	if (opt_tc > 0) {
+		threads = opt_tc;
+	} else {
+		while (threads < minthreads) {
+			if (*rawintensity > 0) {
+				threads = *rawintensity;
+			} else if (*xintensity > 0) {
+				threads = compute_shaders * *xintensity;
+			} else {
+				threads = 1 << *intensity;
+			}
+			if (threads < minthreads) {
+				if (likely(*intensity < MAX_INTENSITY))
+					(*intensity)++;
+				else
+					threads = minthreads;
+			}
 		}
 	}
 
@@ -1799,7 +1804,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		gpu->intervals = 0;
 	}
 
-	set_threads_hashes(clState->vwidth, clState->compute_shaders, &hashes, globalThreads, localThreads[0], &gpu->intensity, &gpu->xintensity, &gpu->rawintensity);
+	set_threads_hashes(clState->vwidth, clState->compute_shaders, &hashes, globalThreads, localThreads[0], &gpu->intensity, &gpu->xintensity, &gpu->rawintensity, gpu->opt_tc);
 	if (hashes > gpu->max_hashes)
 		gpu->max_hashes = hashes;
 

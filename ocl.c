@@ -513,6 +513,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 
 	if (cgpu->work_size && cgpu->work_size <= clState->max_work_size)
 		clState->wsize = cgpu->work_size;
+	else if (opt_scrypt_chacha)
+		clState->wsize = 12;
 	else if (opt_scrypt)
 		clState->wsize = 256;
 	else if (strstr(name, "Tahiti"))
@@ -525,8 +527,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 #ifdef USE_SCRYPT
 	if (opt_scrypt) {
 		if (!cgpu->opt_lg) {
-			applog(LOG_NOTICE, "GPU %d: selecting lookup gap of 4", gpu);
-			cgpu->lookup_gap = 4;
+			applog(LOG_NOTICE, "GPU %d: selecting lookup gap of 32", gpu);
+			cgpu->lookup_gap = 32;
 		} else
 			cgpu->lookup_gap = cgpu->opt_lg;
 
@@ -543,8 +545,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		if ((!cgpu->opt_tc) && (!cgpu->buffer_size)) {
 			unsigned long base_alloc;
 
-			// default to 88% of the available memory and find the closest MB value divisible by 8
-			base_alloc = (unsigned long)(cgpu->max_alloc * 88 / 100 / 1024 / 1024 / 8) * 8 * 1024 * 1024 / cgpu->threads;
+			// default to 100% of the available memory and find the closest MB value divisible by 8
+			base_alloc = (unsigned long)(cgpu->max_alloc * 100 / 100 / 1024 / 1024 / 8) * 8 * 1024 * 1024 / cgpu->threads;
 			// base_alloc is now the number of bytes to allocate.  
 			// 2 threads of 336 MB did not fit into dedicated VRAM while 1 thread of 772MB did.  334 MB each did
 			// to be safe, reduce by 2MB per thread beyond the first
