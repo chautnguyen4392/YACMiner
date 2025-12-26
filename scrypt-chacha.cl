@@ -593,14 +593,20 @@ scrypt_ROMix(uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/
 	/* 1: X = B */
 	/* implicit */
 
+	/* TACA: Scratchpad Population Phase */
+	/* TACA: Normal scrypt: Store every iteration */
+	/* TACA: With LOOKUP_GAP: Store every LOOKUP_GAP iterations */
 	/* 2: for i = 0 to N - 1 do */
 	for (y = 0; y < N / LOOKUP_GAP; y++) {
 		/* 3: V_i = X */
+		/* TACA: Store X in scratchpad */
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
+			/* TACA: Store at position (z,x,y) */
 			lookup[CO] = X[z];
 		}
 
+		/* TACA: Mix X LOOKUP_GAP times before next store */
 		for (j = 0; j < LOOKUP_GAP; j++) {
 			/* 4: X = H(X) */
 			scrypt_ChunkMix_inplace_local(X);
@@ -622,24 +628,30 @@ scrypt_ROMix(uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/
 	}
 #endif
 
+	/* TACA: Scratchpad Access Phase */
 	/* 6: for i = 0 to N - 1 do */
 	for (i = 0; i < N; i++) {
+		/* TACA: Random index which stored value to read*/
 		/* 7: j = Integerify(X) % N */
 		j = X[4].x & (N - 1);
 		y = j / LOOKUP_GAP;
 
+		/* TACA: Load from scratchpad */
 		#pragma unroll
 		for (z = 0; z < zSIZE; z++) {
 			W[z] = lookup[CO];
 		}
 
-		
+		/* TACA: Reconstruct missing iterations */
 #if (LOOKUP_GAP == 1)
+		/* TACA: No reconstruction needed */
 #elif (LOOKUP_GAP == 2)
+		/* TACA: One extra mix */
 		if (j & 1) {
 			scrypt_ChunkMix_inplace_local(W);
 		}
 #else
+		/* TACA: Multiple extra mixes */
 		uint c = j % LOOKUP_GAP;
 		for (uint k = 0; k < c; k++) {
 			scrypt_ChunkMix_inplace_local(W);
