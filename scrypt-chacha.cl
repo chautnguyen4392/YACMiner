@@ -826,10 +826,9 @@ scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 
 static void
 scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid) {
-	const uint effective_concurrency = CONCURRENT_THREADS;
 	const uint zSIZE = 8;
 	const uint ySIZE = (N/LOOKUP_GAP+(N%LOOKUP_GAP>0));
-	const uint xSIZE = effective_concurrency;
+	const uint xSIZE = CONCURRENT_THREADS;
 	const uint x = gid % xSIZE;
 	uint i, j, y, z;
 	uint4 W[8];
