@@ -1254,6 +1254,8 @@ struct work {
 	bool		mandatory;
 	bool		block;
 	bool		queued;
+	bool		submitted;
+	bool		fresh_work_ready;
 
 	bool		stratum;
 	char 		*job_id;

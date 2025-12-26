@@ -260,6 +260,8 @@ void postcalc_hash_async(struct thr_info *thr, struct work *work, uint32_t *res)
 
 	pcd->thr = thr;
 	pcd->work = copy_work(work);
+	/* Mark work as submitted to trigger waiting for fresh work */
+	work->submitted = true;
 	buffersize = opt_scrypt ? SCRYPT_BUFFERSIZE : BUFFERSIZE;
 	memcpy(&pcd->res, res, buffersize);
 

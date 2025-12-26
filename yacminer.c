@@ -222,6 +222,8 @@ pthread_mutex_t restart_lock;
 pthread_cond_t restart_cond;
 
 pthread_cond_t gws_cond;
+pthread_cond_t fresh_work_cond;
+static bool fresh_work_requested = false;
 
 double total_mhashes_done;
 static struct timeval total_tv_start, total_tv_end;
@@ -2578,6 +2580,7 @@ static void reject_pool(struct pool *pool)
 }
 
 static void restart_threads(void);
+static void wake_gws(void);
 
 /* Theoretically threads could race when modifying accepted and
  * rejected values but the chance of two submits completing at the
@@ -2645,6 +2648,15 @@ share_result(json_t *val, json_t *res, json_t *err, const struct work *work,
 		 * that new work is needed. */
 		if (unlikely(work->block))
 			restart_threads();
+		
+		/* Request fresh work after successful submission when blockchain node has new work */
+		applog(LOG_DEBUG, "Requesting fresh work after successful submission");
+		mutex_lock(stgd_lock);
+		fresh_work_requested = true;
+		mutex_unlock(stgd_lock);
+		
+		/* Trigger immediate work fetch */
+		wake_gws();
 	} else {
 		mutex_lock(&stats_lock);
 		cgpu->rejected++;
@@ -3779,12 +3791,11 @@ static void wake_gws(void)
 	mutex_unlock(stgd_lock);
 }
 
-static void discard_stale(void)
+static void discard_stale_locked(void)
 {
 	struct work *work, *tmp;
 	int stale = 0;
 
-	mutex_lock(stgd_lock);
 	HASH_ITER(hh, staged_work, work, tmp) {
 		if (stale_work(work, false)) {
 			HASH_DEL(staged_work, work);
@@ -3793,10 +3804,16 @@ static void discard_stale(void)
 		}
 	}
 	pthread_cond_signal(&gws_cond);
-	mutex_unlock(stgd_lock);
 
 	if (stale)
 		applog(LOG_DEBUG, "Discarded %d stales that didn't match current hash", stale);
+}
+
+static void discard_stale(void)
+{
+	mutex_lock(stgd_lock);
+	discard_stale_locked();
+	mutex_unlock(stgd_lock);
 }
 
 /* A generic wait function for threads that poll that will wait a specified
@@ -4040,6 +4057,13 @@ static bool hash_push(struct work *work)
 	if (likely(!getq->frozen)) {
 		HASH_ADD_INT(staged_work, id, work);
 		HASH_SORT(staged_work, tv_sort);
+		
+		/* Discard any stale work from the queue when fresh work is added */
+		applog(LOG_DEBUG, "Fresh work staged, discarding stale work and signaling fresh_work_cond");
+		discard_stale_locked();
+		
+		/* Signal that fresh work is now available in the queue */
+		pthread_cond_signal(&fresh_work_cond);
 	} else
 		rc = false;
 	pthread_cond_broadcast(&getq->cond);
@@ -6066,6 +6090,17 @@ static inline bool abandon_work(struct work *work, struct timeval *wdiff, uint64
 	    hashes >= 0xfffffffe ||
 	    stale_work(work, false))
 		return true;
+	
+	/* If work is submitted, wait for fresh work to be available */
+	if (work->submitted) {
+		applog(LOG_DEBUG, "Work submitted, waiting for fresh work");
+		mutex_lock(stgd_lock);
+		pthread_cond_wait(&fresh_work_cond, stgd_lock);
+		mutex_unlock(stgd_lock);
+		applog(LOG_DEBUG, "Fresh work signal received, abandoning current work");
+		return true;
+	}
+	
 	return false;
 }
 
@@ -7785,6 +7820,8 @@ int main(int argc, char *argv[])
 
 	if (unlikely(pthread_cond_init(&gws_cond, NULL)))
 		quit(1, "Failed to pthread_cond_init gws_cond");
+	if (unlikely(pthread_cond_init(&fresh_work_cond, NULL)))
+		quit(1, "Failed to pthread_cond_init fresh_work_cond");
 
 	sprintf(packagename, "%s %s", PACKAGE, VERSION);
 
@@ -8251,15 +8288,25 @@ begin_bench:
 		if (!pool_localgen(cp) && !ts && !opt_fail_only)
 			lagging = true;
 
-		/* Wait until hash_pop tells us we need to create more work */
-		if (ts > max_staged) {
+		/* Wait until hash_pop tells us we need to create more work, or fresh work is requested */
+		if (ts > max_staged || fresh_work_requested) {
+			if (fresh_work_requested) {
+				applog(LOG_DEBUG, "Getwork thread waiting for fresh work request (staged: %d, max: %d)", ts, max_staged);
+			}
 			pthread_cond_wait(&gws_cond, stgd_lock);
 			ts = __total_staged();
 		}
 		mutex_unlock(stgd_lock);
 
-		if (ts > max_staged)
+		/* Only skip work generation if we have enough staged work AND no fresh work was requested */
+		if (ts > max_staged && !fresh_work_requested)
 			continue;
+
+		/* Clear fresh work request flag after deciding to process it */
+		if (fresh_work_requested) {
+			fresh_work_requested = false;
+			applog(LOG_DEBUG, "Processing fresh work request after successful submission");
+		}
 
 		work = make_work();
 
