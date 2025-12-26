@@ -116,6 +116,7 @@ bool opt_scrypt_chacha_84=false;
 bool opt_scrypt_split_kernels=true;
 bool opt_use_system_ram=false;  // Use system RAM for additional padbuffer8_RAM buffers
 bool opt_limit_ram_buffer=false;  // Limit RAM buffer size to max_alloc
+int opt_reserve_vram=0;  // Reserve VRAM in MB (0 = disabled)
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
@@ -1404,6 +1405,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--limit-ram-buffer",
 			opt_set_bool, &opt_limit_ram_buffer,
 			"Limit RAM buffer size to max_alloc (disabled by default)"),
+	OPT_WITH_ARG("--reserve-vram",
+			set_int_0_to_9999, opt_show_intval, &opt_reserve_vram,
+			"Reserve VRAM in MB (0 = disabled, default: 0)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),
