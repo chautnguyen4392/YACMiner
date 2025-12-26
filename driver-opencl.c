@@ -1835,7 +1835,7 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 		gpu->intervals = 0;
 	}
 
-	set_threads_hashes(clState->vwidth, clState->compute_shaders, &hashes, globalThreads, localThreads[0], &gpu->intensity, &gpu->xintensity, &gpu->rawintensity, gpu->opt_tc);
+	set_threads_hashes(clState->vwidth, clState->compute_shaders, &hashes, globalThreads, localThreads[0], &gpu->intensity, &gpu->xintensity, &gpu->rawintensity, gpu->thread_concurrency);
 	if (hashes > gpu->max_hashes)
 		gpu->max_hashes = hashes;
 
