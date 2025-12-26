@@ -154,6 +154,20 @@ static cl_ulong get_available_system_ram_per_gpu(void) {
 		}
 	}
 	
+	// Reserve system RAM from total available if opt_reserve_ram > 0
+	if (opt_reserve_ram > 0) {
+		const cl_ulong reserve_bytes = (cl_ulong)opt_reserve_ram * 1024ULL * 1024ULL;
+		if (mem_available > reserve_bytes) {
+			mem_available -= reserve_bytes;
+			applog(LOG_INFO, "Reserving %d MB system RAM, remaining system RAM: %lu MB",
+			       opt_reserve_ram, (unsigned long)(mem_available / (1024 * 1024)));
+		} else {
+			applog(LOG_WARNING, "Requested reserve (%d MB) exceeds available system RAM (%lu MB), using all available",
+			       opt_reserve_ram, (unsigned long)(mem_available / (1024 * 1024)));
+			mem_available = 0;
+		}
+	}
+	
 	// Count number of enabled OpenCL GPU devices (considers --device option)
 	int num_gpus = count_enabled_opencl_devices();
 	if (num_gpus <= 0) {
@@ -858,39 +872,8 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			bsize = 1024;
 		const size_t ipt = (bsize / cgpu->lookup_gap + (bsize % cgpu->lookup_gap > 0));
 
-		// if we do not have TC and we do not have BS, then calculate some conservative numbers
-		if ((!cgpu->opt_tc) && (!cgpu->buffer_size)) {
-			unsigned long base_alloc;
 
-			// default to 100% of the available memory and find the closest MB value divisible by 8
-			base_alloc = (unsigned long)(cgpu->max_alloc * 100 / 100 / 1024 / 1024 / 8) * 8 * 1024 * 1024 / cgpu->threads;
-			// base_alloc is now the number of bytes to allocate.  
-			// 2 threads of 336 MB did not fit into dedicated VRAM while 1 thread of 772MB did.  334 MB each did
-			// to be safe, reduce by 2MB per thread beyond the first
-
-			base_alloc -= (cgpu->threads - 1) * 2 * 1024 * 1024;
-
-			cgpu->thread_concurrency = base_alloc / 128 / ipt;
-			cgpu->buffer_size = base_alloc / 1024 / 1024;
-			applog(LOG_DEBUG,"88%% Max Allocation: %lu",base_alloc);
-			applog(LOG_NOTICE, "GPU %d: selecting buffer_size of %zu", gpu, cgpu->buffer_size);
-		} else
-			cgpu->thread_concurrency = cgpu->opt_tc;
-
-		if (cgpu->buffer_size) {
-			// use the buffer-size to overwrite the thread-concurrency
-			cgpu->thread_concurrency = (int)((cgpu->buffer_size * 1024 * 1024) / ipt / 128);
-			applog(LOG_DEBUG, "GPU %d: setting thread_concurrency to %lu based on buffer size %lu and lookup gap %d", gpu, (unsigned long)(cgpu->thread_concurrency),(unsigned long)(cgpu->buffer_size),(int)(cgpu->lookup_gap));
-		}
-
-
-		// Calculate item size, group size, and number of groups
-		const size_t each_item_size = 128 * ipt;
-		const size_t each_group_size = each_item_size * clState->wsize;
-		const size_t number_groups = cgpu->thread_concurrency / clState->wsize;
-		const cl_ulong total_groups_size = (cl_ulong)number_groups * each_group_size;
-
-		// Calculate remaining memory after other buffers (conservative estimate)
+		// Calculate remaining vram after other buffers (conservative estimate)
 		const size_t CLbuffer0_size = 128;
 		const size_t outputBuffer_size = SCRYPT_BUFFERSIZE;
 		// Estimate temp buffers (will be created later if split kernels enabled)
@@ -901,13 +884,35 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			temp_X2_size = temp_X_size;
 		}
 		const size_t other_buffers_size = CLbuffer0_size + outputBuffer_size + temp_X_size + temp_X2_size;
-		cl_ulong remaining_vram;
+
+		// Calculate VRAM reservation:
+		// - If opt_reserve_vram > 0: use that value
+		// - If opt_reserve_vram = 0 and using CL_DEVICE_GLOBAL_MEM_SIZE: reserve 200 MB
+		// - If opt_reserve_vram = 0 and using AMD free memory: no reservation
+		cl_ulong reserve_bytes = 0;
 		if (opt_reserve_vram > 0) {
-			const cl_ulong reserve_bytes = (cl_ulong)opt_reserve_vram * 1024ULL * 1024ULL;
-			remaining_vram = (cgpu->global_mem_size > reserve_bytes) ? (cgpu->global_mem_size - reserve_bytes) : 0;
-			applog(LOG_INFO, "GPU %d: Reserving %d MB VRAM, remaining VRAM: %lu bytes", gpu, opt_reserve_vram, (unsigned long)remaining_vram);
+			reserve_bytes = (cl_ulong)opt_reserve_vram * 1024ULL * 1024ULL;
+		} else if (!use_amd_free_mem) {
+			reserve_bytes = 200ULL * 1024ULL * 1024ULL; // Default 200 MB for CL_DEVICE_GLOBAL_MEM_SIZE
+		}
+
+		// Check if we can reserve the requested amount
+		if (reserve_bytes > 0 && cgpu->global_mem_size < reserve_bytes) {
+			applog(LOG_WARNING, "GPU %d: Cannot reserve %lu bytes VRAM (only %lu bytes available)", 
+			       gpu, (long unsigned int)reserve_bytes, (long unsigned int)(cgpu->global_mem_size));
+		}
+
+		// Calculate remaining VRAM after reservation
+		const cl_ulong total_reserved = reserve_bytes + other_buffers_size;
+		cl_ulong remaining_vram;
+		if (cgpu->global_mem_size > total_reserved) {
+			remaining_vram = cgpu->global_mem_size - total_reserved;
+			if (reserve_bytes > 0) {
+				applog(LOG_INFO, "GPU %d: Reserving %lu bytes VRAM, remaining VRAM: %lu bytes", 
+				       gpu, (long unsigned int)reserve_bytes, (long unsigned int)remaining_vram);
+			}
 		} else {
-			remaining_vram = cgpu->global_mem_size - other_buffers_size;
+			remaining_vram = 0;
 		}
 		const bool use_multiple_buffers = (remaining_vram > cgpu->max_alloc);
 
@@ -921,12 +926,27 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 			}
 		}
 
-		// Ensure total size for all groups fits within available memory (VRAM + system RAM if enabled) to prevent memory overlap
+		// Total available memory is the remaining VRAM + the available system RAM if enabled
 		cl_ulong total_available_mem = remaining_vram;
 		if (opt_use_system_ram) {
 			total_available_mem += available_system_ram;
 		}
 		
+		// Calculate item size, group size, and number of groups
+		const size_t each_item_size = 128 * ipt;
+		const size_t each_group_size = each_item_size * clState->wsize;
+		size_t number_groups;
+		if (!cgpu->opt_tc) {
+			// Calculate number_groups and thread_concurrency based on total_available_mem
+			number_groups = (remaining_vram / each_group_size) + (available_system_ram / each_group_size);
+			cgpu->thread_concurrency = number_groups * clState->wsize;
+		} else {
+			cgpu->thread_concurrency = cgpu->opt_tc;
+			number_groups = cgpu->thread_concurrency / clState->wsize;
+		}
+		const cl_ulong total_groups_size = (cl_ulong)number_groups * each_group_size;
+
+		// Ensure total size for all groups fits within available memory (VRAM + system RAM if enabled) to prevent memory overlap
 		if (total_available_mem > 0 && total_groups_size > total_available_mem) {
 			applog(LOG_ERR, "GPU %d: Total groups size (%lu bytes) exceeds available memory (%lu bytes). "
 			       "This would cause memory overlap. Please reduce thread_concurrency or lookup_gap.", 
