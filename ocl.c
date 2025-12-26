@@ -312,12 +312,12 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 	}
 
 	/////////////////////////////////////////////////////////////////
-	// Create an OpenCL command queue
+	// Create an OpenCL command queue with profiling enabled
 	/////////////////////////////////////////////////////////////////
 	clState->commandQueue = clCreateCommandQueue(clState->context, devices[gpu],
-						     CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &status);
+						     CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &status);
 	if (status != CL_SUCCESS) /* Try again without OOE enable */
-		clState->commandQueue = clCreateCommandQueue(clState->context, devices[gpu], 0 , &status);
+		clState->commandQueue = clCreateCommandQueue(clState->context, devices[gpu], CL_QUEUE_PROFILING_ENABLE, &status);
 	if (status != CL_SUCCESS) {
 		applog(LOG_ERR, "Error %d: Creating Command Queue. (clCreateCommandQueue)", status);
 		return NULL;
