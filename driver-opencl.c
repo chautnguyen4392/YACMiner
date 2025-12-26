@@ -1293,7 +1293,7 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 	unsigned int num = 0;
 	cl_uint le_target;
 	cl_int status = 0;
-	uint32_t data[20];
+	uint32_t data[21];
 
 	int minn = sc_minn;
 	int maxn = sc_maxn;
@@ -1301,7 +1301,14 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 	cl_uint nfactor=10;
 	cl_uint N;
 
-	unsigned int timestamp = bswap_32(*((unsigned int *)(blk->work->data + 17*4)));
+	unsigned int timestamp;
+	if (opt_scrypt_chacha_84) {
+		// For 84-byte headers, timestamp is 8 bytes starting at offset 68
+		// Use the lower 32 bits for timestamp
+		timestamp = bswap_32(*((unsigned int *)(blk->work->data + 17*4)));
+	} else {
+		timestamp = bswap_32(*((unsigned int *)(blk->work->data + 17*4)));
+	}
 
 	if (opt_scrypt_chacha || opt_n_scrypt)
 	{
@@ -1336,11 +1343,16 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 		clState->cldata = blk->work->data;
 	} else {
 		applog(LOG_DEBUG, "Timestamp: %d, Nfactor: %d, Target: %x", timestamp, nfactor, le_target);
-		sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 19);
+		if (opt_scrypt_chacha_84) {
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 20);
+		} else {
+			sj_be32enc_vect(data, (const uint32_t *)blk->work->data, 19);
+		}
 		clState->cldata = data;
 	}
         
-	status = clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, 80, clState->cldata, 0, NULL,NULL);
+	int buffer_size = opt_scrypt_chacha_84 ? 84 : 80;
+	status = clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, buffer_size, clState->cldata, 0, NULL,NULL);
 
 	CL_SET_ARG(clState->CLbuffer0);
 	CL_SET_ARG(clState->outputBuffer);

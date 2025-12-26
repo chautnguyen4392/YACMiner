@@ -53,12 +53,17 @@ static void sj_scrypt(const uint8_t *password, size_t password_len, const uint8_
 
 void sc_scrypt_regenhash(struct work *work)
 {
-	uint32_t data[20];
-	uint32_t *nonce = (uint32_t *)(work->data + 76);
+	uint32_t data[21];
+	uint32_t *nonce = (uint32_t *)(work->data + (opt_scrypt_chacha_84 ? 80 : 76));
 	uint32_t *ohash = (uint32_t *)(work->hash);
 
-	sj_be32enc_vect(data, (const uint32_t *)work->data, 19);
-	data[19] = htobe32(*nonce);
+	if (opt_scrypt_chacha_84) {
+		sj_be32enc_vect(data, (const uint32_t *)work->data, 20);
+		data[20] = htobe32(*nonce);
+	} else {
+		sj_be32enc_vect(data, (const uint32_t *)work->data, 19);
+		data[19] = htobe32(*nonce);
+	}
 
 	int minn = sc_minn;
 	int maxn = sc_maxn;
@@ -81,7 +86,14 @@ void sc_scrypt_regenhash(struct work *work)
 		starttime = *work->pool->sc_starttime;
 		//applog(LOG_NOTICE,"in queue_scrypt_kernel, work->pool->sc_maxn: %d",*work->pool->sc_starttime);
 	}
-	int nfactor = GetNfactor(data[17], minn, maxn, starttime);
+	int nfactor;
+	if (opt_scrypt_chacha_84) {
+		// For 84-byte headers, timestamp is in data[17] and data[18]
+		// Use the lower 32 bits (data[17]) for Nfactor calculation
+		nfactor = GetNfactor(data[17], minn, maxn, starttime);
+	} else {
+		nfactor = GetNfactor(data[17], minn, maxn, starttime);
+	}
 
 	/* Print data array as hex string */
 	char *data_hex = bin2hex((unsigned char *)data, sizeof(data));
@@ -97,8 +109,13 @@ void sc_scrypt_regenhash(struct work *work)
 	uint32_t ohash_be[8];
 	swab256(ohash_be, ohash);
 	char *ohash_hex = bin2hex((unsigned char *)ohash_be, 32);
-	applog(LOG_DEBUG, "Data array: %s, timestamp %d, Nfactor: %d, Nonce: %u, Output hash (BE): %s",
-		data_hex, data[17], nfactor, data[19], ohash_hex);
+	if (opt_scrypt_chacha_84) {
+		applog(LOG_DEBUG, "Data array: %s, timestamp %d, Nfactor: %d, Nonce: %u, Output hash (BE): %s",
+			data_hex, data[17], nfactor, data[20], ohash_hex);
+	} else {
+		applog(LOG_DEBUG, "Data array: %s, timestamp %d, Nfactor: %d, Nonce: %u, Output hash (BE): %s",
+			data_hex, data[17], nfactor, data[19], ohash_hex);
+	}
 	free(data_hex);
 	free(ohash_hex);
 }

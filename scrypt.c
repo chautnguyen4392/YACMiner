@@ -406,7 +406,7 @@ void scrypt_regenhash(struct work *work)
 {
 	uint32_t data[20];
 	char *scratchbuf;
-	uint32_t *nonce = (uint32_t *)(work->data + 76);
+	uint32_t *nonce = (uint32_t *)(work->data + (opt_scrypt_chacha_84 ? 80 : 76));
 	uint32_t *ohash = (uint32_t *)(work->hash);
 
 	int minn = sc_minn;
