@@ -12,7 +12,7 @@ This document consolidates the design and implementation notes for distributing 
 - `each_group_size = 128 * ipt * wsize` bytes (one lookup group).
 - `number_groups = thread_concurrency / wsize`.
 - `max_alloc = cgpu->max_alloc`, `global_mem_size = cgpu->global_mem_size`.
-- `padbuffer8[0..2]`: VRAM buffers (up to 3).
+- `padbuffer8[0..4]`: VRAM buffers (up to 5).
 - `padbuffer8_RAM[0..1]`: System RAM buffers (up to 2) allocated with `CL_MEM_ALLOC_HOST_PTR`.
 
 ## Memory Source Detection
@@ -33,7 +33,7 @@ This document consolidates the design and implementation notes for distributing 
 1. `num_groups_for_vram = min(number_groups, remaining_vram / each_group_size)`.
 2. `max_groups_per_buffer = max_alloc / each_group_size`. Abort if zero (group larger than alloc limit).
 3. Determine if multiple buffers are required: `use_multiple_buffers = (remaining_vram > max_alloc)` and `num_groups_for_vram > 0`.
-4. `required_buffers = ceil(num_groups_for_vram / max_groups_per_buffer)` capped at 3. Warn when capping.
+4. `required_buffers = ceil(num_groups_for_vram / max_groups_per_buffer)` capped at 5. Warn when capping.
 5. Partition groups evenly:
    - For each buffer, assign `ceil(groups_remaining / buffers_remaining)` but clamp to `max_groups_per_buffer`.
    - Continue until all VRAM groups are assigned.
@@ -55,7 +55,7 @@ This document consolidates the design and implementation notes for distributing 
 ## Kernel Integration
 - All kernels accept the selected buffers: system RAM buffers first (prioritized), VRAM buffers second.
 - Preprocessor defines communicate counts and sizes:
-  - `NUM_PADBUFFERS`, `THREADS_PER_BUFFER_0/1/2`
+  - `NUM_PADBUFFERS`, `THREADS_PER_BUFFER_0/1/2/3/4`
   - `NUM_PADBUFFERS_RAM`, `THREADS_PER_BUFFER_RAM_0/1`
 - Kernel dispatch logic:
   - Compute `group_id` via `get_group_id(0)` to avoid `global_work_offset` issues.
@@ -67,7 +67,7 @@ This document consolidates the design and implementation notes for distributing 
 - **Info/Debug:** memory source diagnostics, buffer allocations, utilisation percentages for VRAM and RAM, and per-buffer sizes during creation/destruction.
 
 ## Future Improvements
-- Configurable utilisation targets or dynamic buffer counts beyond current limits (3 VRAM / 2 RAM).
+- Configurable utilisation targets or dynamic buffer counts beyond current limits (5 VRAM / 2 RAM).
 - Adaptive distribution across GPUs instead of equal RAM splitting.
 - Runtime monitoring to trigger automatic workload adjustments instead of hard aborts.
 

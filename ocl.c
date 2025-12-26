@@ -183,7 +183,7 @@ static bool configure_vram_padbuffers(struct cgpu_info *cgpu,
 				      unsigned int gpu,
 				      cl_ulong *total_padbuffer_mem_out)
 {
-	size_t optimal_groups_per_buffer_vram[3] = {0, 0, 0};
+	size_t optimal_groups_per_buffer_vram[5] = {0, 0, 0, 0, 0};
 	size_t optimal_num_buffers_vram = 1;
 	cl_ulong total_padbuffer_mem = 0;
 	size_t max_groups_per_buffer = cgpu->max_alloc / each_group_size;
@@ -196,7 +196,7 @@ static bool configure_vram_padbuffers(struct cgpu_info *cgpu,
 	}
 
 	if (use_multiple_buffers && num_groups_for_vram > 0) {
-		const size_t max_vram_buffers = 3;
+		const size_t max_vram_buffers = 5;
 		size_t required_buffers = (num_groups_for_vram + max_groups_per_buffer - 1) / max_groups_per_buffer;
 
 		if (required_buffers == 0)
@@ -236,9 +236,9 @@ static bool configure_vram_padbuffers(struct cgpu_info *cgpu,
 		total_padbuffer_mem += each_group_size * optimal_groups_per_buffer_vram[i];
 	}
 
-	applog(LOG_DEBUG, "GPU %d: Calculated buffer config: %zu buffers, groups per buffer: [%zu, %zu, %zu]",
+	applog(LOG_DEBUG, "GPU %d: Calculated buffer config: %zu buffers, groups per buffer: [%zu, %zu, %zu, %zu, %zu]",
 	       gpu, clState->num_padbuffers,
-	       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2]);
+	       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2], clState->groups_per_buffer[3], clState->groups_per_buffer[4]);
 
 	// Calculate remaining unused memory
 	const cl_ulong unused_mem = (remaining_vram > total_padbuffer_mem) ? (remaining_vram - total_padbuffer_mem) : 0;
@@ -934,7 +934,7 @@ _clState *initCl(unsigned int gpu, char *name, size_t nameSize)
 		// Calculate optimal buffer configuration for multiple padbuffer8 buffers
 		// Initialize padbuffer8 array
 		clState->num_padbuffers = 0;
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 5; i++) {
 			clState->padbuffer8[i] = NULL;
 			clState->groups_per_buffer[i] = 0;
 		}
@@ -1087,20 +1087,22 @@ build:
 	if (opt_scrypt)
 	{
 		// Calculate threads per buffer for ROMix indexing (VRAM buffers)
-		size_t threads_per_buffer[3];
+		size_t threads_per_buffer[5];
 		threads_per_buffer[0] = clState->groups_per_buffer[0] * clState->wsize;
 		threads_per_buffer[1] = clState->groups_per_buffer[1] * clState->wsize;
 		threads_per_buffer[2] = clState->groups_per_buffer[2] * clState->wsize;
+		threads_per_buffer[3] = clState->groups_per_buffer[3] * clState->wsize;
+		threads_per_buffer[4] = clState->groups_per_buffer[4] * clState->wsize;
 		
 		// Calculate threads per buffer for ROMix indexing (system RAM buffers)
 		size_t threads_per_buffer_ram[2];
 		threads_per_buffer_ram[0] = clState->groups_per_buffer_RAM[0] * clState->wsize;
 		threads_per_buffer_ram[1] = clState->groups_per_buffer_RAM[1] * clState->wsize;
 		
-		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d -D NUM_PADBUFFERS=%zu -D THREADS_PER_BUFFER_0=%zu -D THREADS_PER_BUFFER_1=%zu -D THREADS_PER_BUFFER_2=%zu -D NUM_PADBUFFERS_RAM=%zu -D THREADS_PER_BUFFER_RAM_0=%zu -D THREADS_PER_BUFFER_RAM_1=%zu",
+		sprintf(CompilerOptions, "-D LOOKUP_GAP=%d -D CONCURRENT_THREADS=%d -D WORKSIZE=%d -D NUM_PADBUFFERS=%zu -D THREADS_PER_BUFFER_0=%zu -D THREADS_PER_BUFFER_1=%zu -D THREADS_PER_BUFFER_2=%zu -D THREADS_PER_BUFFER_3=%zu -D THREADS_PER_BUFFER_4=%zu -D NUM_PADBUFFERS_RAM=%zu -D THREADS_PER_BUFFER_RAM_0=%zu -D THREADS_PER_BUFFER_RAM_1=%zu",
 			cgpu->lookup_gap, (unsigned int)cgpu->thread_concurrency, (int)clState->wsize,
 			clState->num_padbuffers,
-			threads_per_buffer[0], threads_per_buffer[1], threads_per_buffer[2],
+			threads_per_buffer[0], threads_per_buffer[1], threads_per_buffer[2], threads_per_buffer[3], threads_per_buffer[4],
 			clState->num_padbuffers_RAM,
 			threads_per_buffer_ram[0], threads_per_buffer_ram[1]);
 	}
@@ -1358,9 +1360,9 @@ built:
 		size_t each_item_size = 128 * ipt;
 		size_t each_group_size = each_item_size * clState->wsize;
 
-		applog(LOG_INFO, "GPU %d: Creating %zu padbuffer8 buffer(s), groups per buffer: [%zu, %zu, %zu]",
+		applog(LOG_INFO, "GPU %d: Creating %zu padbuffer8 buffer(s), groups per buffer: [%zu, %zu, %zu, %zu, %zu]",
 		       gpu, clState->num_padbuffers,
-		       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2]);
+		       clState->groups_per_buffer[0], clState->groups_per_buffer[1], clState->groups_per_buffer[2], clState->groups_per_buffer[3], clState->groups_per_buffer[4]);
 
 		// Create all padbuffer8 buffers (VRAM)
 		for (size_t i = 0; i < clState->num_padbuffers; i++) {
