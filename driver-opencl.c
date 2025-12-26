@@ -1843,6 +1843,16 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	 * and since we do this one cycle behind, we increment the work more
 	 * than enough to prevent repeating work */
 	work->blk.nonce += gpu->max_hashes;
+	
+	/* Check for nonce range overflow to prevent wrapping to other GPU ranges */
+	if (total_devices > 1) {
+		uint32_t nonce_range = 0xFFFFFFFF / total_devices;
+		uint32_t max_nonce_for_gpu = (gpu->device_id + 1) * nonce_range - 1;
+		if (work->blk.nonce > max_nonce_for_gpu) {
+			applog(LOG_DEBUG, "GPU %d nonce range exhausted, resetting to start", gpu->device_id);
+			work->blk.nonce = gpu->device_id * nonce_range;
+		}
+	}
 
 	/* This finish flushes the readbuffer set with CL_FALSE in clEnqueueReadBuffer */
 	clFinish(clState->commandQueue);

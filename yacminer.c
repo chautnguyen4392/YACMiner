@@ -6033,10 +6033,19 @@ out:
 	return ret;
 }
 
-static inline bool abandon_work(struct work *work, struct timeval *wdiff, uint64_t hashes)
+static inline bool abandon_work(struct work *work, struct timeval *wdiff, uint64_t hashes, struct cgpu_info *cgpu)
 {
+	uint32_t max_nonce;
+
+	if (total_devices > 1) {
+		uint32_t nonce_range = 0xFFFFFFFF / total_devices;
+		max_nonce = (cgpu->device_id + 1) * nonce_range - 1;
+	} else {
+		max_nonce = MAXTHREADS;
+	}
+
 	if (wdiff->tv_sec > opt_scantime ||
-	    work->blk.nonce >= MAXTHREADS - hashes ||
+	    work->blk.nonce >= max_nonce - hashes ||
 	    hashes >= 0xfffffffe ||
 	    stale_work(work, false))
 		return true;
@@ -6085,7 +6094,16 @@ static void hash_sole_work(struct thr_info *mythr)
 		cgpu->new_work = true;
 
 		cgtime(&tv_workstart);
-		work->blk.nonce = 0;
+		/* Divide nonce space among GPUs to prevent duplicate work */
+		if (total_devices > 1) {
+			uint32_t nonce_range = 0xFFFFFFFF / total_devices;
+			work->blk.nonce = cgpu->device_id * nonce_range;
+			applog(LOG_DEBUG, "GPU %d assigned nonce range: %u to %u", 
+			       cgpu->device_id, work->blk.nonce, 
+			       work->blk.nonce + nonce_range - 1);
+		} else {
+			work->blk.nonce = 0;
+		}
 		cgpu->max_hashes = 0;
 		if (!drv->prepare_work(mythr, work)) {
 			applog(LOG_ERR, "work prepare failed, exiting "
@@ -6216,7 +6234,7 @@ static void hash_sole_work(struct thr_info *mythr)
 				mt_disable(mythr, thr_id, drv);
 
 			sdiff.tv_sec = sdiff.tv_usec = 0;
-		} while (!abandon_work(work, &wdiff, cgpu->max_hashes));
+		} while (!abandon_work(work, &wdiff, cgpu->max_hashes, cgpu));
 		free_work(work);
 	}
 	cgpu->deven = DEV_DISABLED;
