@@ -220,6 +220,34 @@ scrypt_hash_update_4_after_128(scrypt_hash_state *S, uint in) {
 }
 
 static void
+scrypt_hash_update_12_after_80(scrypt_hash_state *S, const uint4 *in4) {
+	const uchar *in = (const uchar *)in4;
+	uint i;
+
+	/* handle the current data */
+	keccak_block(S, in4);
+	in += SCRYPT_HASH_BLOCK_SIZE;
+
+	/* handle leftover data */
+	//S->leftover = 4;
+	
+	{
+		const uint2 *int2 = (const uint2 *) in;
+
+		S->buffer4[0].xy = int2[0].xy;
+		S->buffer4[0].zw = int2[1].xy;
+	}
+}
+
+static void
+scrypt_hash_update_4_after_12_after_80(scrypt_hash_state *S, uint in) {
+	// assume that leftover = 4
+	/* handle the previous data */
+	S->buffer4[0].zw = (uint2)(in, 0x01);
+	//S->leftover += 1;
+}
+
+static void
 scrypt_hash_update_64(scrypt_hash_state *S, const uint4 *in4) {
 	uint i;
 
@@ -268,6 +296,24 @@ static void
 scrypt_hash_finish_80_after_128_4(scrypt_hash_state *S, uint4 *hash4) {
 	// leftover = 15
 	//S->buffer4[3].w = 0x01; // done already in scrypt_hash_update_4_after_128
+	S->buffer4[4].xy = (uint2)(0, 0x80000000);
+	
+	keccak_block(S, S->buffer4);
+	
+	#pragma unroll
+	for (uint i = 0; i < 4; i++) {
+		hash4[i] = S->state4[i];
+	}
+}
+
+static void
+scrypt_hash_finish_84_after_12_after_80_4(scrypt_hash_state *S, uint4 *hash4) {
+	// leftover = 5
+	//S->buffer4[0].w = 0x01; // done already in scrypt_hash_update_4_after_12_after_80
+	#pragma unroll
+	for (uint i = 1; i < 4; i++) {
+		S->buffer4[i] = ZERO;
+	}
 	S->buffer4[4].xy = (uint2)(0, 0x80000000);
 	
 	keccak_block(S, S->buffer4);
@@ -354,6 +400,13 @@ scrypt_hmac_update_128(scrypt_hmac_state *st, const uint4 *m) {
 }
 
 static void
+scrypt_hmac_update_84(scrypt_hmac_state *st, const uint4 *m) {
+	/* h(inner || m...) */
+	scrypt_hash_update_80(&st->inner, m);
+	scrypt_hash_update_4_after_80(&st->inner, m[5].x);
+}
+
+static void
 scrypt_hmac_update_4_after_80(scrypt_hmac_state *st, uint m) {
 	/* h(inner || m...) */
 	scrypt_hash_update_4_after_80(&st->inner, m);
@@ -363,6 +416,12 @@ static void
 scrypt_hmac_update_4_after_128(scrypt_hmac_state *st, uint m) {
 	/* h(inner || m...) */
 	scrypt_hash_update_4_after_128(&st->inner, m);
+}
+
+static void
+scrypt_hmac_update_4_after_84(scrypt_hmac_state *st, uint m) {
+	/* h(inner || m...) */
+	scrypt_hash_update_4_after_12_after_80(&st->inner, m);
 }
 
 static void
@@ -381,6 +440,17 @@ scrypt_hmac_finish_32B(scrypt_hmac_state *st, uint4 *mac) {
 	/* h(inner || m) */
 	uint4 innerhash[4];
 	scrypt_hash_finish_80_after_128_4(&st->inner, innerhash);
+
+	/* h(outer || h(inner || m)) */
+	scrypt_hash_update_64(&st->outer, innerhash);
+	scrypt_hash_finish_80_after_64(&st->outer, mac);
+}
+
+static void
+scrypt_hmac_finish_84B(scrypt_hmac_state *st, uint4 *mac) {
+	/* h(inner || m) */
+	uint4 innerhash[4];
+	scrypt_hash_finish_84_after_12_after_80_4(&st->inner, innerhash);
 
 	/* h(outer || h(inner || m)) */
 	scrypt_hash_update_64(&st->outer, innerhash);
@@ -466,6 +536,42 @@ scrypt_pbkdf2_32B(const uint4 *password, const uint4 *salt, uint4 *out4) {
 		#pragma unroll
 		for (uint i = 0; i < 2; i++) {
 			out4[i] = ti4[i];
+		}
+}
+
+static void
+scrypt_pbkdf2_84B(const uint4 *password, const uint4 *salt, uint4 *out4) {
+	scrypt_hmac_state hmac_pw, work;
+	uint4 ti4[4];
+	uint i;
+	
+	/* bytes must be <= (0xffffffff - (SCRYPT_HASH_DIGEST_SIZE - 1)), which they will always be under scrypt */
+
+	/* hmac(password, ...) */
+	scrypt_hmac_init(&hmac_pw, password);
+
+	/* hmac(password, salt...) */
+	scrypt_hmac_update_84(&hmac_pw, salt);
+
+		/* U1 = hmac(password, salt || be(i)) */
+		/* U32TO8_BE(be, i); */
+		scrypt_copy_hmac_state_128B(&work, &hmac_pw);
+		scrypt_hmac_update_4_after_84(&work, be1);
+		scrypt_hmac_finish_84B(&work, ti4);
+
+		#pragma unroll
+		for (i = 0; i < 4; i++) {
+			out4[i] = ti4[i];
+		}
+		
+		/* U1 = hmac(password, salt || be(i)) */
+		/* U32TO8_BE(be, i); */
+		scrypt_hmac_update_4_after_84(&hmac_pw, be2);
+		scrypt_hmac_finish_84B(&hmac_pw, ti4);
+
+		#pragma unroll
+		for (i = 0; i < 4; i++) {
+			out4[i + 4] = ti4[i];
 		}
 }
 
@@ -734,10 +840,10 @@ const uint4 midstate0, const uint4 midstate16, const uint target, const uint N)
 	password[3] = input[3];
 	password[4] = input[4];
 	password[5] = input[5];
-	password[5].w = gid;  // Nonce is now in password[5].w
+	password[5].x = gid;  // Nonce is now in password[5].x (80th byte)
 	
 	/* 1: X = PBKDF2(password, salt) */
-	scrypt_pbkdf2_128B(password, password, X);
+	scrypt_pbkdf2_84B(password, password, X);
 
 	/* 2: X = ROMix(X) */
 	scrypt_ROMix(X, (__global uint4 *)padcache, N, gid, Nfactor);
