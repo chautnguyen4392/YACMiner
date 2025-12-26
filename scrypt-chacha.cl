@@ -822,7 +822,12 @@ scrypt_ChunkMix_inplace_local(__private uint4 *restrict B/*[chunkWords]*/) {
 }
 
 #define Coord(x,y,z) x+y*(x ## SIZE)+z*(y ## SIZE)*(x ## SIZE)
+// z+x*(z ## SIZE)+y*(x ## SIZE)*(z ## SIZE) = z+x*zSIZE+y*xSIZE*zSIZE
 #define CO Coord(z,x,y)
+
+// x*ySIZE*zSIZE+y*zSIZE+z
+// z+y*(z ## SIZE)+x*(y ## SIZE)*(z ## SIZE)
+// #define CO Coord(z,y,x)
 
 static void
 scrypt_ROMix(__private uint4 *restrict X/*[chunkWords]*/, __global uint4 *restrict lookup/*[N * chunkWords]*/, const uint gid, const uint xSIZE_override) {
