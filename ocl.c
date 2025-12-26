@@ -289,14 +289,19 @@ static bool configure_ram_padbuffers(struct cgpu_info *cgpu,
 		return false;
 	}
 
-	size_t max_groups_per_ram_buffer = cgpu->max_alloc / each_group_size;
-	applog(LOG_INFO, "GPU %d: max_groups_per_ram_buffer: %zu, cgpu->max_alloc: %lu, each_group_size: %zu",
-		gpu, max_groups_per_ram_buffer, cgpu->max_alloc, each_group_size);
-	if (max_groups_per_ram_buffer == 0) {
-		applog(LOG_WARNING, "GPU %d: Each group is larger than the maximum allocation size; nothing fits in system RAM", gpu);
-		if (total_ram_mem_out)
-			*total_ram_mem_out = 0;
-		return true;
+	size_t max_groups_per_ram_buffer = opt_limit_ram_buffer ? (cgpu->max_alloc / each_group_size) : SIZE_MAX;
+	if (opt_limit_ram_buffer) {
+		applog(LOG_INFO, "GPU %d: max_groups_per_ram_buffer: %zu (limited by max_alloc: %lu), each_group_size: %zu",
+			gpu, max_groups_per_ram_buffer, cgpu->max_alloc, each_group_size);
+		if (max_groups_per_ram_buffer == 0) {
+			applog(LOG_WARNING, "GPU %d: Each group is larger than the maximum allocation size; nothing fits in system RAM", gpu);
+			if (total_ram_mem_out)
+				*total_ram_mem_out = 0;
+			return true;
+		}
+	} else {
+		applog(LOG_INFO, "GPU %d: max_groups_per_ram_buffer: unlimited (--limit-ram-buffer not set), each_group_size: %zu",
+			gpu, each_group_size);
 	}
 
 	size_t required_ram_buffers = (num_groups_for_ram + max_groups_per_ram_buffer - 1) / max_groups_per_ram_buffer;
@@ -1396,8 +1401,8 @@ built:
 			// Create all padbuffer8_RAM buffers using CL_MEM_ALLOC_HOST_PTR for system RAM
 			for (size_t i = 0; i < clState->num_padbuffers_RAM; i++) {
 				size_t buf_size = each_group_size * clState->groups_per_buffer_RAM[i];
-				// Safety check: ensure buffer size doesn't exceed max_alloc
-				if (buf_size > cgpu->max_alloc) {
+				// Safety check: ensure buffer size doesn't exceed max_alloc (only if opt_limit_ram_buffer is enabled)
+				if (opt_limit_ram_buffer && buf_size > cgpu->max_alloc) {
 					applog(LOG_ERR, "GPU %d: padbuffer8_RAM[%zu] size (%zu bytes) exceeds max_alloc (%lu bytes)", 
 					       gpu, i, (unsigned long)buf_size, (long unsigned int)cgpu->max_alloc);
 					// Release already created buffers
