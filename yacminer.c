@@ -603,6 +603,11 @@ static char *set_int_1_to_65535(const char *arg, int *i)
 	return set_int_range(arg, i, 1, 65535);
 }
 
+static char *set_int_0_to_65536(const char *arg, int *i)
+{
+	return set_int_range(arg, i, 0, 65536);
+}
+
 static char *set_int_0_to_10(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 10);
@@ -1407,8 +1412,8 @@ static struct opt_table opt_config_table[] = {
 			opt_set_bool, &opt_limit_ram_buffer,
 			"Limit RAM buffer size to max_alloc (disabled by default)"),
 	OPT_WITH_ARG("--reserve-vram",
-			set_int_0_to_9999, opt_show_intval, &opt_reserve_vram,
-			"Reserve VRAM in MB (0 = disabled, default: 0)"),
+			set_int_0_to_65536, opt_show_intval, &opt_reserve_vram,
+			"Reserve VRAM in MB (0 = disabled, default: 0, max: 65536 MB = 64 GB)"),
 	OPT_WITH_ARG("--reserve-ram",
 			set_int_0_to_9999, opt_show_intval, &opt_reserve_ram,
 			"Reserve system RAM in MB (default: 2048 MB)"),
@@ -4411,6 +4416,7 @@ void write_config(FILE *fcfg)
 			if (opt->type & OPT_HASARG &&
 			   ((void *)opt->cb_arg == (void *)set_int_0_to_9999 ||
 			   (void *)opt->cb_arg == (void *)set_int_1_to_65535 ||
+			   (void *)opt->cb_arg == (void *)set_int_0_to_65536 ||
 			   (void *)opt->cb_arg == (void *)set_int_0_to_10 ||
 			   (void *)opt->cb_arg == (void *)set_int_1_to_10) && opt->desc != opt_hidden)
 				fprintf(fcfg, ",\n\"%s\" : \"%d\"", p+2, *(int *)opt->u.arg);
