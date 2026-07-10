@@ -1616,6 +1616,18 @@ static void get_opencl_statline(char *buf, struct cgpu_info *gpu)
 struct opencl_thread_data {
 	cl_int (*queue_kernel_parameters)(_clState *, dev_blk_ctx *, cl_uint);
 	uint32_t *res;
+
+	/* Full-pipeline hashrate accounting: wall clock measured from the end of
+	 * one scanhash call to the end of the next, so each sample covers the
+	 * kernel plus the result read, the CPU-side checks, and the work handling
+	 * in between. The kernel-only profiling line excludes those phases, so
+	 * this is the number comparable across miners. */
+	struct timeval fullpipe_prev;
+	bool fullpipe_prev_valid;
+	uint64_t fullpipe_nonces;
+	double fullpipe_secs;
+	unsigned int fullpipe_launches;
+	struct timeval fullpipe_last_report;
 };
 
 static uint32_t *blank_res;
@@ -2227,6 +2239,45 @@ static int64_t opencl_scanhash(struct thr_info *thr, struct work *work,
 	if (kernel_event) clReleaseEvent(kernel_event);
 	if (read_event) clReleaseEvent(read_event);
 	if (write_event) clReleaseEvent(write_event);
+
+	/* Full-pipeline hashrate: one sample per completed scan, measured end of
+	 * previous scan to end of this one (see struct opencl_thread_data). The
+	 * first scan only stamps the baseline. A per-launch INFO line supports
+	 * log analysis, and a NOTICE aggregate every 30 s per thread gives the
+	 * number to compare against another miner. */
+	{
+		struct timeval fullpipe_now;
+
+		gettimeofday(&fullpipe_now, NULL);
+		if (thrdata->fullpipe_prev_valid && hashes > 0) {
+			const double launch_secs = (fullpipe_now.tv_sec - thrdata->fullpipe_prev.tv_sec) +
+			                           (fullpipe_now.tv_usec - thrdata->fullpipe_prev.tv_usec) / 1e6;
+			if (launch_secs > 0) {
+				thrdata->fullpipe_nonces += (uint64_t)hashes;
+				thrdata->fullpipe_secs += launch_secs;
+				thrdata->fullpipe_launches++;
+
+				applog(LOG_INFO, "GPU %d full pipeline: %"PRId64" nonces in %.1f ms = %.2f H/s",
+				       gpu->device_id, hashes, launch_secs * 1000.0,
+				       (double)hashes / launch_secs);
+
+				const double report_secs = (fullpipe_now.tv_sec - thrdata->fullpipe_last_report.tv_sec) +
+				                           (fullpipe_now.tv_usec - thrdata->fullpipe_last_report.tv_usec) / 1e6;
+				if (report_secs >= 30.0) {
+					applog(LOG_NOTICE, "GPU %d full pipeline average: %.2f H/s (%"PRIu64" nonces in %.1f s, %u launches)",
+					       gpu->device_id,
+					       (double)thrdata->fullpipe_nonces / thrdata->fullpipe_secs,
+					       thrdata->fullpipe_nonces, thrdata->fullpipe_secs,
+					       thrdata->fullpipe_launches);
+					thrdata->fullpipe_last_report = fullpipe_now;
+				}
+			}
+		} else {
+			thrdata->fullpipe_last_report = fullpipe_now;
+		}
+		thrdata->fullpipe_prev = fullpipe_now;
+		thrdata->fullpipe_prev_valid = true;
+	}
 
 	return hashes;
 }

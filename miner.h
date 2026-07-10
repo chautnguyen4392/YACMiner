@@ -1006,6 +1006,7 @@ extern bool opt_use_system_ram;  // Use system RAM for additional padbuffer8_RAM
 extern bool opt_limit_ram_buffer;  // Limit RAM buffer size to max_alloc
 extern int opt_reserve_vram;  // Reserve VRAM in MB (0 = disabled)
 extern int opt_reserve_ram;  // Reserve system RAM in MB (default: 2048 MB)
+extern int opt_host_ram_budget;  // System RAM budget in MB for padbuffer8_RAM buffers, total across all GPUs (0 = all available minus reserve)
 extern int opt_fixed_nfactor;
 extern bool opt_n_scrypt;
 #else

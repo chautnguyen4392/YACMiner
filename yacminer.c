@@ -118,6 +118,7 @@ bool opt_use_system_ram=false;  // Use system RAM for additional padbuffer8_RAM 
 bool opt_limit_ram_buffer=false;  // Limit RAM buffer size to max_alloc
 int opt_reserve_vram=0;  // Reserve VRAM in MB (0 = disabled)
 int opt_reserve_ram=2048;  // Reserve system RAM in MB (default: 2048 MB)
+int opt_host_ram_budget=0;  // System RAM budget in MB for padbuffer8_RAM buffers, total across all GPUs (0 = all available minus reserve)
 int opt_fixed_nfactor=21;
 bool opt_n_scrypt=0;
 #endif
@@ -1417,6 +1418,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--reserve-ram",
 			set_int_0_to_9999, opt_show_intval, &opt_reserve_ram,
 			"Reserve system RAM in MB (default: 2048 MB)"),
+	OPT_WITH_ARG("--host-ram-budget",
+			set_int_0_to_65536, opt_show_intval, &opt_host_ram_budget,
+			"System RAM budget in MB for scratchpad buffers, total across all GPUs, split evenly (0 = all available minus --reserve-ram, default: 0, max: 65536 MB = 64 GB)"),
 	OPT_WITH_ARG("--shaders",
 		     set_shaders, NULL, NULL,
 		     "GPU shaders per card for tuning scrypt, comma separated"),

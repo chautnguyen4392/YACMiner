@@ -168,6 +168,24 @@ static cl_ulong get_available_system_ram_per_gpu(void) {
 		}
 	}
 	
+	// Cap the available system RAM by --host-ram-budget if set. The budget is
+	// a total across all GPUs (split evenly below). A budget the host cannot
+	// provide is clamped (loudly) to what is actually available, and mining
+	// continues within physical RAM.
+	if (opt_host_ram_budget > 0) {
+		const cl_ulong budget_bytes = (cl_ulong)opt_host_ram_budget * 1024ULL * 1024ULL;
+		if (budget_bytes > mem_available) {
+			applog(LOG_WARNING, "Requested host RAM budget (%d MB) exceeds the %lu MB available after the reserve, clamping to %lu MB",
+			       opt_host_ram_budget,
+			       (unsigned long)(mem_available / (1024 * 1024)),
+			       (unsigned long)(mem_available / (1024 * 1024)));
+		} else {
+			mem_available = budget_bytes;
+			applog(LOG_INFO, "Host RAM budget: %d MB (of the RAM available after the reserve)",
+			       opt_host_ram_budget);
+		}
+	}
+
 	// Count number of enabled OpenCL GPU devices (considers --device option)
 	int num_gpus = count_enabled_opencl_devices();
 	if (num_gpus <= 0) {
